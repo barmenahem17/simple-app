@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RightSideMenu } from "@/components/RightSideMenu";
+import { ExchangeRate } from "@/components/ExchangeRate";
 
 export function AppTopBar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -10,8 +11,9 @@ export function AppTopBar() {
   return (
     <>
       <div className="border-b bg-background sticky top-0 z-50">
-        <div className="flex h-16 items-center px-4">
-          <div className="ml-auto">
+        <div className="flex h-16 items-center px-4 justify-between">
+          {/* כפתור התפריט בצד ימין */}
+          <div>
             <Button
               variant="outline"
               size="sm"
@@ -26,6 +28,9 @@ export function AppTopBar() {
               </div>
             </Button>
           </div>
+          
+          {/* שער החליפין בצד שמאל */}
+          <ExchangeRate />
         </div>
       </div>
       <RightSideMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />
