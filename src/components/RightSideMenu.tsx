@@ -54,10 +54,10 @@ export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
             <Link
               href="/settings"
               onClick={onClose}
-              className="flex items-center justify-end px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors gap-3 font-medium text-foreground/90 hover:text-foreground"
+              className="flex items-center justify-start px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors gap-3 font-medium text-foreground/90 hover:text-foreground"
             >
-              הגדרות
               <Settings className="w-5 h-5" />
+              הגדרות
             </Link>
           </div>
         </div>
