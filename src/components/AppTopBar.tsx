@@ -9,7 +9,7 @@ export function AppTopBar() {
 
   return (
     <>
-      <div className="border-b bg-background">
+      <div className="border-b bg-background sticky top-0 z-50">
         <div className="flex h-16 items-center px-4">
           <div className="ml-auto">
             <Button

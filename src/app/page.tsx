@@ -110,7 +110,7 @@ export default function Home() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <MetricCard
           title="סה״כ שווי כל התיקים"
-          value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
+          value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
         />
         <MetricCard
           title="סה״כ רווח/הפסד על כל התיקים"
@@ -119,7 +119,7 @@ export default function Home() {
         />
         <MetricCard
           title="סה״כ מזומן בשקל ומזומן בדולר"
-          value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
+          value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
         />
       </div>
     </div>

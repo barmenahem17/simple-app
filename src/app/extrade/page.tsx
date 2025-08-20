@@ -4,6 +4,7 @@ import { MetricCard } from "@/components/MetricCard";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Trash2, Edit } from "lucide-react";
 import { 
   getDeposits, 
   addDeposit, 
@@ -60,6 +61,15 @@ export default function Extrade() {
     exchangeRate: "",
     targetCurrency: "USD" as "ILS" | "USD"
   });
+
+  // Format date for display (dd/mm/yyyy)
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
 
   const handleAddDeposit = async () => {
     console.log("addDeposit called with:", formData);
@@ -295,7 +305,7 @@ export default function Extrade() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
             <MetricCard
               title="שווי תיק כולל"
-              value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
+              value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
             />
             <MetricCard
               title="רווח/הפסד (באחוזים ובמטבע) על כל התקופה"
@@ -304,7 +314,7 @@ export default function Extrade() {
             />
             <MetricCard
               title="מזומן בשקל ומזומן בדולר"
-              value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
+              value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
             />
           </div>
 
@@ -401,7 +411,7 @@ export default function Extrade() {
                   <tbody>
                     {deposits.map((deposit) => (
                       <tr key={deposit.id} className="border-b hover:bg-gray-50">
-                        <td className="text-right p-3">{deposit.date}</td>
+                        <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(deposit.date)}</td>
                         <td className="text-right p-3 font-medium">{deposit.amount.toLocaleString()}</td>
                         <td className="text-right p-3">{deposit.currency === "ILS" ? "שקל" : "דולר"}</td>
                         <td className="text-right p-3">
@@ -411,14 +421,14 @@ export default function Extrade() {
                             onClick={() => editDeposit(deposit)}
                             className="ml-2"
                           >
-                            ערוך
+                            <Edit className="w-4 h-4" />
                           </Button>
                           <Button
                             variant="destructive"
                             size="sm"
                             onClick={() => handleDeleteDeposit(deposit.id)}
                           >
-                            מחק
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         </td>
                       </tr>
@@ -541,7 +551,7 @@ export default function Extrade() {
                     <tbody>
                       {conversions.map((conversion) => (
                         <tr key={conversion.id} className="border-b hover:bg-gray-50">
-                          <td className="text-right p-3">{conversion.date}</td>
+                          <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(conversion.date)}</td>
                           <td className="text-right p-3 font-medium">{conversion.source_amount.toLocaleString()}</td>
                           <td className="text-right p-3">{conversion.source_currency === "ILS" ? "שקל" : "דולר"}</td>
                           <td className="text-right p-3">{conversion.exchange_rate}</td>
@@ -553,14 +563,14 @@ export default function Extrade() {
                               onClick={() => editConversion(conversion)}
                               className="ml-2"
                             >
-                              ערוך
+                              <Edit className="w-4 h-4" />
                             </Button>
                             <Button
                               variant="destructive"
                               size="sm"
                               onClick={() => handleDeleteConversion(conversion.id)}
                             >
-                              מחק
+                              <Trash2 className="w-4 h-4" />
                             </Button>
                           </td>
                         </tr>

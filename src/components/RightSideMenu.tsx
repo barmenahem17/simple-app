@@ -25,7 +25,7 @@ export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="right" className="w-[300px] sm:w-[400px]">
+      <SheetContent side="right" className="w-[300px] sm:w-[400px] z-[60]">
         <SheetHeader className="pb-6">
           <SheetTitle className="text-center text-3xl font-black tracking-wide text-primary">
             FINBAR
@@ -43,10 +43,10 @@ export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
                     <Link
                       href={link.href}
                       onClick={onClose}
-                      className="group flex items-center px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
+                      className="group flex items-center px-4 py-4 hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
                     >
-                      <span className="flex-1 text-right">{link.label}</span>
-                      <IconComponent className="w-5 h-5 text-muted-foreground group-hover:text-accent-foreground transition-colors mr-3" />
+                      <IconComponent className="w-5 h-5 text-muted-foreground group-hover:text-accent-foreground transition-colors ml-2" />
+                      <span className="mr-2">{link.label}</span>
                     </Link>
                   </li>
                 );
@@ -59,10 +59,10 @@ export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
             <Link
               href="/settings"
               onClick={onClose}
-              className="group flex items-center px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
+              className="group flex items-center px-4 py-4 hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
             >
-              <span className="flex-1 text-right">הגדרות</span>
-              <Settings className="w-5 h-5 text-muted-foreground group-hover:text-accent-foreground transition-colors mr-3" />
+              <Settings className="w-5 h-5 text-muted-foreground group-hover:text-accent-foreground transition-colors ml-2" />
+              <span className="mr-2">הגדרות</span>
             </Link>
           </div>
         </div>

@@ -156,7 +156,13 @@ export const calculateActualCash = (deposits: Deposit[], conversions: Conversion
   // Account for conversions
   conversions.forEach(conversion => {
     totals[conversion.source_currency] -= conversion.source_amount
-    const targetAmount = conversion.source_amount * conversion.exchange_rate
+    // Exchange rate logic: if converting ILS to USD, divide by rate (e.g., 100 ILS / 3.5 = 28.57 USD)
+    // If converting USD to ILS, multiply by rate (e.g., 100 USD * 3.5 = 350 ILS)
+    const targetAmount = conversion.source_currency === 'ILS' && conversion.target_currency === 'USD'
+      ? conversion.source_amount / conversion.exchange_rate
+      : conversion.source_currency === 'USD' && conversion.target_currency === 'ILS'
+      ? conversion.source_amount * conversion.exchange_rate
+      : conversion.source_amount * conversion.exchange_rate // fallback
     totals[conversion.target_currency] += targetAmount
   })
   

@@ -4,45 +4,46 @@ import { MetricCard } from "@/components/MetricCard";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-interface Deposit {
-  id: string;
-  date: string;
-  amount: number;
-  currency: "ILS" | "USD";
-}
-
-interface Conversion {
-  id: string;
-  date: string;
-  sourceAmount: number;
-  sourceCurrency: "ILS" | "USD";
-  exchangeRate: number;
-  targetCurrency: "ILS" | "USD";
-}
+import { Trash2, Edit } from "lucide-react";
+import { 
+  getDeposits, 
+  addDeposit, 
+  deleteDeposit, 
+  updateDeposit,
+  getConversions, 
+  addConversion, 
+  deleteConversion, 
+  updateConversion,
+  calculateActualCash,
+  type Deposit,
+  type Conversion
+} from "@/lib/database";
 
 export default function Kraken() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [conversions, setConversions] = useState<Conversion[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  // Load data from Supabase
   useEffect(() => {
-    const savedDeposits = localStorage.getItem('kraken-deposits');
-    if (savedDeposits) {
-      setDeposits(JSON.parse(savedDeposits));
-    }
-    const savedConversions = localStorage.getItem('kraken-conversions');
-    if (savedConversions) {
-      setConversions(JSON.parse(savedConversions));
-    }
+    const loadData = async () => {
+      try {
+        setLoading(true);
+        const [depositsData, conversionsData] = await Promise.all([
+          getDeposits('kraken'),
+          getConversions('kraken')
+        ]);
+        setDeposits(depositsData);
+        setConversions(conversionsData);
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('kraken-deposits', JSON.stringify(deposits));
-  }, [deposits]);
-
-  useEffect(() => {
-    localStorage.setItem('kraken-conversions', JSON.stringify(conversions));
-  }, [conversions]);
 
   const [showForm, setShowForm] = useState(false);
   const [showConversionForm, setShowConversionForm] = useState(false);
@@ -61,7 +62,32 @@ export default function Kraken() {
     targetCurrency: "USD" as "ILS" | "USD"
   });
 
-  const addDeposit = () => {
+  // Format date for display (dd/mm/yyyy)
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  };
+
+  // Calculate actual cash for this platform
+  const currentCash = calculateActualCash(deposits, conversions);
+  const totalILS = currentCash.ILS;
+  const totalUSD = currentCash.USD;
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-lg text-gray-600">טוען נתונים...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleAddDeposit = async () => {
     console.log("addDeposit called with:", formData);
     
     // Validate required fields
@@ -79,24 +105,22 @@ export default function Kraken() {
       return;
     }
     
-    const newDeposit: Deposit = {
-      id: Date.now().toString(),
+    const newDeposit = await addDeposit({
+      platform: 'kraken',
       date: formData.date,
       amount: amount,
       currency: formData.currency
-    };
-
-    console.log("Adding new deposit:", newDeposit);
-    setDeposits(prev => {
-      const updated = [...prev, newDeposit];
-      console.log("Updated deposits:", updated);
-      return updated;
     });
-    
-    // Reset form
-    setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
-    setShowForm(false);
-    console.log("Form reset and closed");
+
+    if (newDeposit) {
+      setDeposits(prev => [...prev, newDeposit]);
+      // Reset form
+      setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
+      setShowForm(false);
+      console.log("Deposit added successfully");
+    } else {
+      alert("שגיאה בהוספת ההפקדה");
+    }
   };
 
   const editDeposit = (deposit: Deposit) => {
@@ -109,7 +133,7 @@ export default function Kraken() {
     setShowForm(true);
   };
 
-  const updateDeposit = () => {
+  const handleUpdateDeposit = async () => {
     if (!editingDeposit || !formData.date || !formData.amount) return;
 
     const amount = parseFloat(formData.amount);
@@ -118,18 +142,29 @@ export default function Kraken() {
       return;
     }
 
-    setDeposits(deposits.map(d => 
-      d.id === editingDeposit.id 
-        ? { ...d, date: formData.date, amount: amount, currency: formData.currency }
-        : d
-    ));
-    setEditingDeposit(null);
-    setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
-    setShowForm(false);
+    const updatedDeposit = await updateDeposit(editingDeposit.id, {
+      date: formData.date,
+      amount: amount,
+      currency: formData.currency
+    });
+
+    if (updatedDeposit) {
+      setDeposits(deposits.map(d => 
+        d.id === editingDeposit.id ? updatedDeposit : d
+      ));
+      setEditingDeposit(null);
+      setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
+      setShowForm(false);
+    } else {
+      alert("שגיאה בעדכון ההפקדה");
+    }
   };
 
-  const deleteDeposit = (id: string) => {
-    setDeposits(deposits.filter(d => d.id !== id));
+  const handleDeleteDeposit = async (id: string) => {
+    if (window.confirm('האם אתה בטוח שברצונך למחוק את ההפקדה זו?')) {
+      await deleteDeposit(id);
+      setDeposits(deposits.filter(d => d.id !== id));
+    }
   };
 
   const cancelForm = () => {
@@ -138,26 +173,7 @@ export default function Kraken() {
     setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
   };
 
-  // פונקציה לחישוב מזומן אמיתי עם התחשבות בהמרות
-  const calculateActualCash = () => {
-    const totals = { ILS: 0, USD: 0 };
-    
-    // הוספת הפקדות
-    deposits.forEach(deposit => {
-      totals[deposit.currency] += deposit.amount;
-    });
-    
-    // התחשבות בהמרות
-    conversions.forEach(conversion => {
-      totals[conversion.sourceCurrency] -= conversion.sourceAmount;
-      const targetAmount = conversion.sourceAmount * conversion.exchangeRate;
-      totals[conversion.targetCurrency] += targetAmount;
-    });
-    
-    return totals;
-  };
-
-  const addConversion = () => {
+  const handleAddConversion = async () => {
     if (!conversionFormData.date || !conversionFormData.sourceAmount || !conversionFormData.exchangeRate) {
       alert("אנא מלא את כל השדות הנדרשים");
       return;
@@ -172,7 +188,6 @@ export default function Kraken() {
     }
 
     // בדיקת יתרה זמינה
-    const currentCash = calculateActualCash();
     const availableBalance = currentCash[conversionFormData.sourceCurrency];
     
     if (sourceAmount > availableBalance) {
@@ -180,39 +195,43 @@ export default function Kraken() {
       return;
     }
 
-    const newConversion: Conversion = {
-      id: Date.now().toString(),
+    const newConversion = await addConversion({
+      platform: 'kraken',
       date: conversionFormData.date,
-      sourceAmount: sourceAmount,
-      sourceCurrency: conversionFormData.sourceCurrency,
-      exchangeRate: exchangeRate,
-      targetCurrency: conversionFormData.targetCurrency
-    };
-
-    setConversions([...conversions, newConversion]);
-    setConversionFormData({ 
-      date: new Date().toISOString().split('T')[0], 
-      sourceAmount: "", 
-      sourceCurrency: "ILS", 
-      exchangeRate: "", 
-      targetCurrency: "USD" 
+      source_amount: sourceAmount,
+      source_currency: conversionFormData.sourceCurrency,
+      exchange_rate: exchangeRate,
+      target_currency: conversionFormData.targetCurrency
     });
-    setShowConversionForm(false);
+
+    if (newConversion) {
+      setConversions(prev => [...prev, newConversion]);
+      setConversionFormData({ 
+        date: new Date().toISOString().split('T')[0], 
+        sourceAmount: "", 
+        sourceCurrency: "ILS", 
+        exchangeRate: "", 
+        targetCurrency: "USD" 
+      });
+      setShowConversionForm(false);
+    } else {
+      alert("שגיאה בהוספת ההמרה");
+    }
   };
 
   const editConversion = (conversion: Conversion) => {
     setEditingConversion(conversion);
     setConversionFormData({
       date: conversion.date,
-      sourceAmount: conversion.sourceAmount.toString(),
-      sourceCurrency: conversion.sourceCurrency,
-      exchangeRate: conversion.exchangeRate.toString(),
-      targetCurrency: conversion.targetCurrency
+      sourceAmount: conversion.source_amount.toString(),
+      sourceCurrency: conversion.source_currency,
+      exchangeRate: conversion.exchange_rate.toString(),
+      targetCurrency: conversion.target_currency
     });
     setShowConversionForm(true);
   };
 
-  const updateConversion = () => {
+  const handleUpdateConversion = async () => {
     if (!editingConversion || !conversionFormData.date || !conversionFormData.sourceAmount || !conversionFormData.exchangeRate) return;
 
     const sourceAmount = parseFloat(conversionFormData.sourceAmount);
@@ -223,31 +242,46 @@ export default function Kraken() {
       return;
     }
 
-    setConversions(conversions.map(c => 
-      c.id === editingConversion.id 
-        ? { 
-            ...c, 
-            date: conversionFormData.date, 
-            sourceAmount: sourceAmount, 
-            sourceCurrency: conversionFormData.sourceCurrency,
-            exchangeRate: exchangeRate,
-            targetCurrency: conversionFormData.targetCurrency
-          }
-        : c
-    ));
-    setEditingConversion(null);
-    setConversionFormData({ 
-      date: new Date().toISOString().split('T')[0], 
-      sourceAmount: "", 
-      sourceCurrency: "ILS", 
-      exchangeRate: "", 
-      targetCurrency: "USD" 
+    const updatedConversion = await updateConversion(editingConversion.id, {
+      date: conversionFormData.date,
+      source_amount: sourceAmount,
+      source_currency: conversionFormData.sourceCurrency,
+      exchange_rate: exchangeRate,
+      target_currency: conversionFormData.targetCurrency
     });
-    setShowConversionForm(false);
+
+    if (updatedConversion) {
+      setConversions(conversions.map(c => 
+        c.id === editingConversion.id 
+          ? { 
+              ...c, 
+              date: conversionFormData.date, 
+              source_amount: sourceAmount, 
+              source_currency: conversionFormData.sourceCurrency,
+              exchange_rate: exchangeRate,
+              target_currency: conversionFormData.targetCurrency
+            }
+          : c
+      ));
+      setEditingConversion(null);
+      setConversionFormData({ 
+        date: new Date().toISOString().split('T')[0], 
+        sourceAmount: "", 
+        sourceCurrency: "ILS", 
+        exchangeRate: "", 
+        targetCurrency: "USD" 
+      });
+      setShowConversionForm(false);
+    } else {
+      alert("שגיאה בעדכון ההמרה");
+    }
   };
 
-  const deleteConversion = (id: string) => {
-    setConversions(conversions.filter(c => c.id !== id));
+  const handleDeleteConversion = async (id: string) => {
+    if (window.confirm('האם אתה בטוח שברצונך למחוק את ההמרה זו?')) {
+      await deleteConversion(id);
+      setConversions(conversions.filter(c => c.id !== id));
+    }
   };
 
   const cancelConversionForm = () => {
@@ -262,27 +296,22 @@ export default function Kraken() {
     });
   };
 
-  // חישוב מזומן אמיתי עם התחשבות בהמרות
-  const actualCash = calculateActualCash();
-  const totalILS = actualCash.ILS;
-  const totalUSD = actualCash.USD;
-
   return (
     <div className="container mx-auto p-6">
       <h1 className="text-3xl font-bold text-right mb-8">Kraken</h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <MetricCard
           title="שווי תיק כולל"
-          value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
+          value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
         />
         <MetricCard
           title="רווח/הפסד (באחוזים ובמטבע) על כל התקופה"
           value="—% / —"
-          valueClassName="text-green-600"
+          valueClassName="text-red-600"
         />
         <MetricCard
           title="מזומן בשקל ומזומן בדולר"
-          value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
+          value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
         />
       </div>
 
@@ -300,118 +329,118 @@ export default function Kraken() {
               הוסף הפקדה
             </Button>
           </CardHeader>
-        <CardContent>
-          {showForm && (
-            <div className="mb-4 p-4 border rounded-lg bg-gray-50">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1 text-right">תאריך</label>
-                  <input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => {
-                      console.log("Date changed:", e.target.value);
-                      setFormData({...formData, date: e.target.value});
-                    }}
-                    max={new Date().toISOString().split('T')[0]}
-                    className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                    required
-                  />
+          <CardContent>
+            {showForm && (
+              <div className="mb-4 p-4 border rounded-lg bg-gray-50">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">תאריך</label>
+                    <input
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => {
+                        console.log("Date changed:", e.target.value);
+                        setFormData({...formData, date: e.target.value});
+                      }}
+                      max={new Date().toISOString().split('T')[0]}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">סכום</label>
+                    <input
+                      type="number"
+                      placeholder="הזן סכום"
+                      value={formData.amount}
+                      onChange={(e) => {
+                        console.log("Amount changed:", e.target.value);
+                        setFormData({...formData, amount: e.target.value});
+                      }}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">מטבע</label>
+                    <select
+                      value={formData.currency}
+                      onChange={(e) => {
+                        console.log("Currency changed:", e.target.value);
+                        setFormData({...formData, currency: e.target.value as "ILS" | "USD"});
+                      }}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                    >
+                      <option value="ILS">שקל</option>
+                      <option value="USD">דולר</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1 text-right">סכום</label>
-                  <input
-                    type="number"
-                    placeholder="הזן סכום"
-                    value={formData.amount}
-                    onChange={(e) => {
-                      console.log("Amount changed:", e.target.value);
-                      setFormData({...formData, amount: e.target.value});
-                    }}
-                    className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                    min="0"
-                    step="0.01"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1 text-right">מטבע</label>
-                  <select
-                    value={formData.currency}
-                    onChange={(e) => {
-                      console.log("Currency changed:", e.target.value);
-                      setFormData({...formData, currency: e.target.value as "ILS" | "USD"});
-                    }}
-                    className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                <div className="flex gap-2 justify-end">
+                  <Button 
+                    onClick={editingDeposit ? handleUpdateDeposit : handleAddDeposit}
+                    className="bg-blue-600 hover:bg-blue-700"
                   >
-                    <option value="ILS">שקל</option>
-                    <option value="USD">דולר</option>
-                  </select>
+                    {editingDeposit ? "עדכן" : "הוסף"}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={cancelForm}
+                  >
+                    ביטול
+                  </Button>
                 </div>
               </div>
-              <div className="flex gap-2 justify-end">
-                <Button 
-                  onClick={editingDeposit ? updateDeposit : addDeposit}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  {editingDeposit ? "עדכן" : "הוסף"}
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={cancelForm}
-                >
-                  ביטול
-                </Button>
-              </div>
-            </div>
-          )}
+            )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b bg-gray-50">
-                  <th className="text-right p-3 font-medium">תאריך</th>
-                  <th className="text-right p-3 font-medium">סכום</th>
-                  <th className="text-right p-3 font-medium">מטבע</th>
-                  <th className="text-right p-3 font-medium">פעולות</th>
-                </tr>
-              </thead>
-              <tbody>
-                {deposits.map((deposit) => (
-                  <tr key={deposit.id} className="border-b hover:bg-gray-50">
-                    <td className="text-right p-3">{deposit.date}</td>
-                    <td className="text-right p-3 font-medium">{deposit.amount.toLocaleString()}</td>
-                    <td className="text-right p-3">{deposit.currency === "ILS" ? "שקל" : "דולר"}</td>
-                    <td className="text-right p-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => editDeposit(deposit)}
-                        className="ml-2"
-                      >
-                        ערוך
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => deleteDeposit(deposit.id)}
-                      >
-                        מחק
-                      </Button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-right p-3 font-medium">תאריך</th>
+                    <th className="text-right p-3 font-medium">סכום</th>
+                    <th className="text-right p-3 font-medium">מטבע</th>
+                    <th className="text-right p-3 font-medium">פעולות</th>
                   </tr>
-                ))}
-                {deposits.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="text-center p-8 text-gray-500">
-                      אין הפקדות להצגה
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
+                </thead>
+                <tbody>
+                  {deposits.map((deposit) => (
+                    <tr key={deposit.id} className="border-b hover:bg-gray-50">
+                      <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(deposit.date)}</td>
+                      <td className="text-right p-3 font-medium">{deposit.amount.toLocaleString()}</td>
+                      <td className="text-right p-3">{deposit.currency === "ILS" ? "שקל" : "דולר"}</td>
+                      <td className="text-right p-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => editDeposit(deposit)}
+                          className="ml-2"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDeleteDeposit(deposit.id)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {deposits.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="text-center p-8 text-gray-500">
+                        אין הפקדות להצגה
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
         </Card>
 
         <Card>
@@ -494,7 +523,7 @@ export default function Kraken() {
                   </div>
                 </div>
                 <div className="flex gap-2 justify-end">
-                  <Button onClick={editingConversion ? updateConversion : addConversion}>
+                  <Button onClick={editingConversion ? handleUpdateConversion : handleAddConversion}>
                     {editingConversion ? "עדכן" : "הוסף"}
                   </Button>
                   <Button variant="outline" onClick={cancelConversionForm}>
@@ -519,11 +548,11 @@ export default function Kraken() {
                 <tbody>
                   {conversions.map((conversion) => (
                     <tr key={conversion.id} className="border-b hover:bg-gray-50">
-                      <td className="text-right p-3">{conversion.date}</td>
-                      <td className="text-right p-3 font-medium">{conversion.sourceAmount.toLocaleString()}</td>
-                      <td className="text-right p-3">{conversion.sourceCurrency === "ILS" ? "שקל" : "דולר"}</td>
-                      <td className="text-right p-3">{conversion.exchangeRate}</td>
-                      <td className="text-right p-3">{conversion.targetCurrency === "ILS" ? "שקל" : "דולר"}</td>
+                      <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(conversion.date)}</td>
+                      <td className="text-right p-3 font-medium">{conversion.source_amount.toLocaleString()}</td>
+                      <td className="text-right p-3">{conversion.source_currency === "ILS" ? "שקל" : "דולר"}</td>
+                      <td className="text-right p-3">{conversion.exchange_rate}</td>
+                      <td className="text-right p-3">{conversion.target_currency === "ILS" ? "שקל" : "דולר"}</td>
                       <td className="text-right p-3">
                         <Button
                           variant="outline"
@@ -531,14 +560,14 @@ export default function Kraken() {
                           onClick={() => editConversion(conversion)}
                           className="ml-2"
                         >
-                          ערוך
+                          <Edit className="w-4 h-4" />
                         </Button>
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => deleteConversion(conversion.id)}
+                          onClick={() => handleDeleteConversion(conversion.id)}
                         >
-                          מחק
+                          <Trash2 className="w-4 h-4" />
                         </Button>
                       </td>
                     </tr>
