@@ -49,12 +49,12 @@ export default function IBKR() {
   const [editingDeposit, setEditingDeposit] = useState<Deposit | null>(null);
   const [editingConversion, setEditingConversion] = useState<Conversion | null>(null);
   const [formData, setFormData] = useState({
-    date: "",
+    date: new Date().toISOString().split('T')[0],
     amount: "",
     currency: "ILS" as "ILS" | "USD"
   });
   const [conversionFormData, setConversionFormData] = useState({
-    date: "",
+    date: new Date().toISOString().split('T')[0],
     sourceAmount: "",
     sourceCurrency: "ILS" as "ILS" | "USD",
     exchangeRate: "",
@@ -94,7 +94,7 @@ export default function IBKR() {
     });
     
     // Reset form
-    setFormData({ date: "", amount: "", currency: "ILS" });
+    setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
     setShowForm(false);
     console.log("Form reset and closed");
   };
@@ -124,7 +124,7 @@ export default function IBKR() {
         : d
     ));
     setEditingDeposit(null);
-    setFormData({ date: "", amount: "", currency: "ILS" });
+    setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
     setShowForm(false);
   };
 
@@ -135,7 +135,26 @@ export default function IBKR() {
   const cancelForm = () => {
     setShowForm(false);
     setEditingDeposit(null);
-    setFormData({ date: "", amount: "", currency: "ILS" });
+    setFormData({ date: new Date().toISOString().split('T')[0], amount: "", currency: "ILS" });
+  };
+
+  // פונקציה לחישוב מזומן אמיתי עם התחשבות בהמרות
+  const calculateActualCash = () => {
+    const totals = { ILS: 0, USD: 0 };
+    
+    // הוספת הפקדות
+    deposits.forEach(deposit => {
+      totals[deposit.currency] += deposit.amount;
+    });
+    
+    // התחשבות בהמרות
+    conversions.forEach(conversion => {
+      totals[conversion.sourceCurrency] -= conversion.sourceAmount;
+      const targetAmount = conversion.sourceAmount * conversion.exchangeRate;
+      totals[conversion.targetCurrency] += targetAmount;
+    });
+    
+    return totals;
   };
 
   const addConversion = () => {
@@ -152,6 +171,15 @@ export default function IBKR() {
       return;
     }
 
+    // בדיקת יתרה זמינה
+    const currentCash = calculateActualCash();
+    const availableBalance = currentCash[conversionFormData.sourceCurrency];
+    
+    if (sourceAmount > availableBalance) {
+      alert(`אין מספיק יתרה זמינה. יתרה זמינה: ${availableBalance.toFixed(2)} ${conversionFormData.sourceCurrency}`);
+      return;
+    }
+
     const newConversion: Conversion = {
       id: Date.now().toString(),
       date: conversionFormData.date,
@@ -163,7 +191,7 @@ export default function IBKR() {
 
     setConversions([...conversions, newConversion]);
     setConversionFormData({ 
-      date: "", 
+      date: new Date().toISOString().split('T')[0], 
       sourceAmount: "", 
       sourceCurrency: "ILS", 
       exchangeRate: "", 
@@ -209,7 +237,7 @@ export default function IBKR() {
     ));
     setEditingConversion(null);
     setConversionFormData({ 
-      date: "", 
+      date: new Date().toISOString().split('T')[0], 
       sourceAmount: "", 
       sourceCurrency: "ILS", 
       exchangeRate: "", 
@@ -226,7 +254,7 @@ export default function IBKR() {
     setShowConversionForm(false);
     setEditingConversion(null);
     setConversionFormData({ 
-      date: "", 
+      date: new Date().toISOString().split('T')[0], 
       sourceAmount: "", 
       sourceCurrency: "ILS", 
       exchangeRate: "", 
@@ -234,8 +262,10 @@ export default function IBKR() {
     });
   };
 
-  const totalILS = deposits.filter(d => d.currency === "ILS").reduce((sum, d) => sum + d.amount, 0);
-  const totalUSD = deposits.filter(d => d.currency === "USD").reduce((sum, d) => sum + d.amount, 0);
+  // חישוב מזומן אמיתי עם התחשבות בהמרות
+  const actualCash = calculateActualCash();
+  const totalILS = actualCash.ILS;
+  const totalUSD = actualCash.USD;
 
   return (
     <div className="container mx-auto p-6">
@@ -243,7 +273,7 @@ export default function IBKR() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <MetricCard
           title="שווי תיק כולל"
-          value={`₪ ${totalILS.toLocaleString()} | $ ${totalUSD.toLocaleString()}`}
+          value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
         />
         <MetricCard
           title="רווח/הפסד (באחוזים ובמטבע) על כל התקופה"
@@ -252,7 +282,7 @@ export default function IBKR() {
         />
         <MetricCard
           title="מזומן בשקל ומזומן בדולר"
-          value={`₪ ${totalILS.toLocaleString()} | $ ${totalUSD.toLocaleString()}`}
+          value={`₪ ${totalILS.toFixed(2)} | $ ${totalUSD.toFixed(2)}`}
         />
       </div>
 
@@ -284,7 +314,7 @@ export default function IBKR() {
                       setFormData({...formData, date: e.target.value});
                     }}
                     max={new Date().toISOString().split('T')[0]}
-                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                     required
                   />
                 </div>
@@ -298,7 +328,7 @@ export default function IBKR() {
                       console.log("Amount changed:", e.target.value);
                       setFormData({...formData, amount: e.target.value});
                     }}
-                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                     min="0"
                     step="0.01"
                     required
@@ -312,7 +342,7 @@ export default function IBKR() {
                       console.log("Currency changed:", e.target.value);
                       setFormData({...formData, currency: e.target.value as "ILS" | "USD"});
                     }}
-                    className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                   >
                     <option value="ILS">שקל</option>
                     <option value="USD">דולר</option>
@@ -405,7 +435,7 @@ export default function IBKR() {
                       value={conversionFormData.date}
                       onChange={(e) => setConversionFormData({...conversionFormData, date: e.target.value})}
                       max={new Date().toISOString().split('T')[0]}
-                      className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                       required
                     />
                   </div>
@@ -416,7 +446,7 @@ export default function IBKR() {
                       placeholder="הזן סכום"
                       value={conversionFormData.sourceAmount}
                       onChange={(e) => setConversionFormData({...conversionFormData, sourceAmount: e.target.value})}
-                      className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                       min="0"
                       step="0.01"
                       required
@@ -431,7 +461,7 @@ export default function IBKR() {
                         sourceCurrency: e.target.value as "ILS" | "USD",
                         targetCurrency: e.target.value === "ILS" ? "USD" : "ILS"
                       })}
-                      className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                     >
                       <option value="ILS">שקל</option>
                       <option value="USD">דולר</option>
@@ -444,7 +474,7 @@ export default function IBKR() {
                       placeholder="הזן שער"
                       value={conversionFormData.exchangeRate}
                       onChange={(e) => setConversionFormData({...conversionFormData, exchangeRate: e.target.value})}
-                      className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                       min="0"
                       step="0.0001"
                       required

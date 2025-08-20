@@ -8,7 +8,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { Settings } from "lucide-react";
+import { Settings, Home, TrendingUp, BarChart3, Coins } from "lucide-react";
 
 interface RightSideMenuProps {
   isOpen: boolean;
@@ -17,35 +17,40 @@ interface RightSideMenuProps {
 
 export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
   const mainLinks = [
-    { href: "/", label: "דף הבית" },
-    { href: "/extrade", label: "Extrade" },
-    { href: "/ibkr", label: "IBKR" },
-    { href: "/kraken", label: "Kraken" },
+    { href: "/", label: "דף הבית", icon: Home },
+    { href: "/extrade", label: "Extrade", icon: TrendingUp },
+    { href: "/ibkr", label: "IBKR", icon: BarChart3 },
+    { href: "/kraken", label: "Kraken", icon: Coins },
   ];
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent side="right" className="w-[300px] sm:w-[400px]">
-        <SheetHeader className="pb-4">
-          <SheetTitle className="text-right text-2xl font-bold pr-8">
+        <SheetHeader className="pb-6">
+          <SheetTitle className="text-center text-3xl font-black tracking-wide text-primary">
             FINBAR
           </SheetTitle>
+          <Separator className="mt-4" />
         </SheetHeader>
         
-        <div className="flex flex-col h-full mt-4">
+        <div className="flex flex-col h-full mt-2">
           <nav className="flex-1">
             <ul className="space-y-1">
-              {mainLinks.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    onClick={onClose}
-                    className="block px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
+              {mainLinks.map((link) => {
+                const IconComponent = link.icon;
+                return (
+                  <li key={link.href}>
+                    <Link
+                      href={link.href}
+                      onClick={onClose}
+                      className="group flex items-center px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
+                    >
+                      <span className="flex-1 text-right">{link.label}</span>
+                      <IconComponent className="w-5 h-5 text-muted-foreground group-hover:text-accent-foreground transition-colors mr-3" />
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </nav>
           
@@ -54,10 +59,10 @@ export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
             <Link
               href="/settings"
               onClick={onClose}
-              className="flex items-center justify-start px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors gap-3 font-medium text-foreground/90 hover:text-foreground"
+              className="group flex items-center px-4 py-4 text-right hover:bg-accent hover:text-accent-foreground rounded-lg transition-colors font-medium text-foreground/90 hover:text-foreground"
             >
-              <Settings className="w-5 h-5" />
-              הגדרות
+              <span className="flex-1 text-right">הגדרות</span>
+              <Settings className="w-5 h-5 text-muted-foreground group-hover:text-accent-foreground transition-colors mr-3" />
             </Link>
           </div>
         </div>
