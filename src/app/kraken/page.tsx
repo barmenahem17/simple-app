@@ -14,14 +14,24 @@ import {
   addConversion, 
   deleteConversion, 
   updateConversion,
+  getTransactions,
+  addTransaction,
+  updateTransaction,
+  deleteTransaction,
+  sellTransaction,
   calculateActualCash,
+  calculateInvestmentAmount,
+  calculateProfitLoss,
+  formatCurrency,
   type Deposit,
-  type Conversion
+  type Conversion,
+  type Transaction
 } from "@/lib/database";
 
 export default function Kraken() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [conversions, setConversions] = useState<Conversion[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Load data from Supabase
@@ -29,12 +39,14 @@ export default function Kraken() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [depositsData, conversionsData] = await Promise.all([
+        const [depositsData, conversionsData, transactionsData] = await Promise.all([
           getDeposits('kraken'),
-          getConversions('kraken')
+          getConversions('kraken'),
+          getTransactions('kraken')
         ]);
         setDeposits(depositsData);
         setConversions(conversionsData);
+        setTransactions(transactionsData);
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
@@ -47,8 +59,12 @@ export default function Kraken() {
 
   const [showForm, setShowForm] = useState(false);
   const [showConversionForm, setShowConversionForm] = useState(false);
+  const [showTransactionForm, setShowTransactionForm] = useState(false);
+  const [showSellForm, setShowSellForm] = useState(false);
   const [editingDeposit, setEditingDeposit] = useState<Deposit | null>(null);
   const [editingConversion, setEditingConversion] = useState<Conversion | null>(null);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+  const [sellingTransaction, setSellingTransaction] = useState<Transaction | null>(null);
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     amount: "",
@@ -60,6 +76,22 @@ export default function Kraken() {
     sourceCurrency: "ILS" as "ILS" | "USD",
     exchangeRate: "",
     targetCurrency: "USD" as "ILS" | "USD"
+  });
+
+  // Transaction form data
+  const [transactionFormData, setTransactionFormData] = useState({
+    symbol: "",
+    buy_date: new Date().toISOString().split('T')[0],
+    quantity: "",
+    buy_price: "",
+    buy_fee: ""
+  });
+
+  const [sellFormData, setSellFormData] = useState({
+    sell_date: new Date().toISOString().split('T')[0],
+    sell_quantity: "",
+    sell_price_per_unit: "",
+    sell_fee: ""
   });
 
   // Format date for display (dd/mm/yyyy)
@@ -293,6 +325,188 @@ export default function Kraken() {
       sourceCurrency: "ILS", 
       exchangeRate: "", 
       targetCurrency: "USD" 
+    });
+  };
+
+  // Transaction functions
+  const handleAddTransaction = async () => {
+    if (!transactionFormData.symbol || !transactionFormData.buy_date || 
+        !transactionFormData.quantity || !transactionFormData.buy_price || !transactionFormData.buy_fee) {
+      alert("אנא מלא את כל השדות הנדרשים");
+      return;
+    }
+
+    const quantity = parseFloat(transactionFormData.quantity);
+    const buy_price = parseFloat(transactionFormData.buy_price);
+    const buy_fee = parseFloat(transactionFormData.buy_fee);
+
+    if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0 || isNaN(buy_fee) || buy_fee < 0) {
+      alert("אנא הזן ערכים תקינים");
+      return;
+    }
+
+    const newTransaction = await addTransaction({
+      platform: 'kraken',
+      symbol: transactionFormData.symbol.toUpperCase(),
+      buy_date: transactionFormData.buy_date,
+      quantity: quantity,
+      buy_price: buy_price,
+      buy_fee: buy_fee,
+      buy_fee_currency: 'USD'
+    });
+
+    if (newTransaction) {
+      setTransactions(prev => [...prev, newTransaction]);
+      setTransactionFormData({
+        symbol: "",
+        buy_date: new Date().toISOString().split('T')[0],
+        quantity: "",
+        buy_price: "",
+        buy_fee: ""
+      });
+      setShowTransactionForm(false);
+    } else {
+      alert("שגיאה בהוספת העסקה");
+    }
+  };
+
+  const editTransaction = (transaction: Transaction) => {
+    setEditingTransaction(transaction);
+    setTransactionFormData({
+      symbol: transaction.symbol,
+      buy_date: transaction.buy_date,
+      quantity: transaction.quantity.toString(),
+      buy_price: transaction.buy_price.toString(),
+      buy_fee: transaction.buy_fee.toString()
+    });
+    setShowTransactionForm(true);
+  };
+
+  const handleUpdateTransaction = async () => {
+    if (!editingTransaction || !transactionFormData.symbol || !transactionFormData.buy_date || 
+        !transactionFormData.quantity || !transactionFormData.buy_price || !transactionFormData.buy_fee) return;
+
+    const quantity = parseFloat(transactionFormData.quantity);
+    const buy_price = parseFloat(transactionFormData.buy_price);
+    const buy_fee = parseFloat(transactionFormData.buy_fee);
+
+    if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0 || isNaN(buy_fee) || buy_fee < 0) {
+      alert("אנא הזן ערכים תקינים");
+      return;
+    }
+
+    const updatedTransaction = await updateTransaction(editingTransaction.id, {
+      symbol: transactionFormData.symbol.toUpperCase(),
+      buy_date: transactionFormData.buy_date,
+      quantity: quantity,
+      buy_price: buy_price,
+      buy_fee: buy_fee,
+      buy_fee_currency: 'USD'
+    });
+
+    if (updatedTransaction) {
+      setTransactions(transactions.map(t => 
+        t.id === editingTransaction.id ? updatedTransaction : t
+      ));
+      setEditingTransaction(null);
+      setTransactionFormData({
+        symbol: "",
+        buy_date: new Date().toISOString().split('T')[0],
+        quantity: "",
+        buy_price: "",
+        buy_fee: ""
+      });
+      setShowTransactionForm(false);
+    } else {
+      alert("שגיאה בעדכון העסקה");
+    }
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    if (window.confirm('האם אתה בטוח שברצונך למחוק את העסקה זו?')) {
+      await deleteTransaction(id);
+      setTransactions(transactions.filter(t => t.id !== id));
+    }
+  };
+
+  const startSellTransaction = (transaction: Transaction) => {
+    setSellingTransaction(transaction);
+    setSellFormData({
+      sell_date: new Date().toISOString().split('T')[0],
+      sell_quantity: transaction.quantity.toString(), // ברירת מחדל - כל הכמות
+      sell_price_per_unit: "",
+      sell_fee: ""
+    });
+    setShowSellForm(true);
+  };
+
+  const handleSellTransaction = async () => {
+    if (!sellingTransaction || !sellFormData.sell_date || !sellFormData.sell_quantity || !sellFormData.sell_price_per_unit || !sellFormData.sell_fee) {
+      alert("אנא מלא את כל השדות הנדרשים");
+      return;
+    }
+
+    const sell_quantity = parseFloat(sellFormData.sell_quantity);
+    const sell_price_per_unit = parseFloat(sellFormData.sell_price_per_unit);
+    const sell_fee = parseFloat(sellFormData.sell_fee);
+
+    if (isNaN(sell_quantity) || sell_quantity <= 0 || isNaN(sell_price_per_unit) || sell_price_per_unit <= 0 || isNaN(sell_fee) || sell_fee < 0) {
+      alert("אנא הזן ערכים תקינים");
+      return;
+    }
+
+    // Check if selling more than owned
+    if (sell_quantity > sellingTransaction.quantity) {
+      alert(`לא ניתן למכור יותר מ-${sellingTransaction.quantity} יחידות`);
+      return;
+    }
+
+    const soldTransaction = await sellTransaction(
+      sellingTransaction.id,
+      sellFormData.sell_date,
+      sell_quantity,
+      sell_price_per_unit,
+      sell_fee
+    );
+
+    if (soldTransaction) {
+      setTransactions(transactions.map(t => 
+        t.id === sellingTransaction.id ? soldTransaction : t
+      ));
+      setSellingTransaction(null);
+      setSellFormData({
+        sell_date: new Date().toISOString().split('T')[0],
+        sell_quantity: "",
+        sell_price_per_unit: "",
+        sell_fee: ""
+      });
+      setShowSellForm(false);
+    } else {
+      alert("שגיאה במכירת העסקה");
+    }
+  };
+
+  const cancelTransactionForm = () => {
+    setShowTransactionForm(false);
+    setEditingTransaction(null);
+    setTransactionFormData({
+      symbol: "",
+      buy_date: new Date().toISOString().split('T')[0],
+      quantity: "",
+      buy_price: "",
+      buy_fee: "",
+      buy_fee_currency: "USD"
+    });
+  };
+
+  const cancelSellForm = () => {
+    setShowSellForm(false);
+    setSellingTransaction(null);
+    setSellFormData({
+      sell_date: new Date().toISOString().split('T')[0],
+      sell_quantity: "",
+      sell_price_per_unit: "",
+      sell_fee: ""
     });
   };
 
@@ -576,6 +790,312 @@ export default function Kraken() {
                     <tr>
                       <td colSpan={6} className="text-center p-8 text-gray-500">
                         אין המרות להצגה
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* טבלת עסקאות */}
+      <div className="mt-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-right">עסקאות</CardTitle>
+            <Button 
+              onClick={() => setShowTransactionForm(true)} 
+              className="text-sm"
+            >
+              הוסף עסקה
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {/* טופס הוספת/עריכת עסקה */}
+            {showTransactionForm && (
+              <div className="mb-4 p-4 border rounded-lg bg-gray-50">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">סימול</label>
+                    <input
+                      type="text"
+                      placeholder="הזן סימול (AAPL, BTC וכו')"
+                      value={transactionFormData.symbol}
+                      onChange={(e) => setTransactionFormData({...transactionFormData, symbol: e.target.value})}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">תאריך קנייה</label>
+                    <input
+                      type="date"
+                      value={transactionFormData.buy_date}
+                      onChange={(e) => setTransactionFormData({...transactionFormData, buy_date: e.target.value})}
+                      max={new Date().toISOString().split('T')[0]}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">כמות</label>
+                    <input
+                      type="number"
+                      placeholder="הזן כמות"
+                      value={transactionFormData.quantity}
+                      onChange={(e) => setTransactionFormData({...transactionFormData, quantity: e.target.value})}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.00001"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">מחיר קנייה</label>
+                    <input
+                      type="number"
+                      placeholder="הזן מחיר"
+                      value={transactionFormData.buy_price}
+                      onChange={(e) => setTransactionFormData({...transactionFormData, buy_price: e.target.value})}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">עמלת קנייה ($)</label>
+                    <input
+                      type="number"
+                      placeholder="הזן עמלה"
+                      value={transactionFormData.buy_fee}
+                      onChange={(e) => setTransactionFormData({...transactionFormData, buy_fee: e.target.value})}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <Button 
+                    onClick={editingTransaction ? handleUpdateTransaction : handleAddTransaction}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {editingTransaction ? "עדכן" : "הוסף"}
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={cancelTransactionForm}
+                  >
+                    ביטול
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* טופס מכירה */}
+            {showSellForm && sellingTransaction && (
+              <div className="mb-4 p-4 border rounded-lg bg-yellow-50">
+                <h3 className="text-lg font-semibold mb-4 text-right">
+                  מכירת {sellingTransaction.symbol} - זמין: {sellingTransaction.quantity} יחידות
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">תאריך מכירה</label>
+                    <input
+                      type="date"
+                      value={sellFormData.sell_date}
+                      onChange={(e) => setSellFormData({...sellFormData, sell_date: e.target.value})}
+                      max={new Date().toISOString().split('T')[0]}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">כמות למכירה</label>
+                    <input
+                      type="number"
+                      placeholder="הזן כמות"
+                      value={sellFormData.sell_quantity}
+                      onChange={(e) => setSellFormData({...sellFormData, sell_quantity: e.target.value})}
+                      max={sellingTransaction.quantity}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.00001"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">מחיר ליחידה</label>
+                    <input
+                      type="number"
+                      placeholder="הזן מחיר ליחידה"
+                      value={sellFormData.sell_price_per_unit}
+                      onChange={(e) => setSellFormData({...sellFormData, sell_price_per_unit: e.target.value})}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1 text-right">עמלת מכירה ($)</label>
+                    <input
+                      type="number"
+                      placeholder="הזן עמלת מכירה"
+                      value={sellFormData.sell_fee}
+                      onChange={(e) => setSellFormData({...sellFormData, sell_fee: e.target.value})}
+                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
+                      min="0"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+                </div>
+                {sellFormData.sell_quantity && sellFormData.sell_price_per_unit && (
+                  <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                    <p className="text-right text-blue-800">
+                      <strong>סכום כולל מהמכירה: </strong>
+                      {formatCurrency(
+                        parseFloat(sellFormData.sell_quantity || "0") * parseFloat(sellFormData.sell_price_per_unit || "0"),
+                        sellingTransaction.buy_fee_currency
+                      )}
+                    </p>
+                  </div>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <Button 
+                    onClick={handleSellTransaction}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    מכור
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={cancelSellForm}
+                  >
+                    ביטול
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* טבלת עסקאות */}
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b bg-gray-50">
+                    <th className="text-right p-3 font-medium">סימול</th>
+                    <th className="text-right p-3 font-medium">תאריך קנייה</th>
+                    <th className="text-right p-3 font-medium">כמות</th>
+                    <th className="text-right p-3 font-medium">מחיר קנייה</th>
+                    <th className="text-right p-3 font-medium">עמלת קנייה</th>
+                    <th className="text-right p-3 font-medium">סכום השקעה</th>
+                    <th className="text-right p-3 font-medium">סטטוס</th>
+                    <th className="text-right p-3 font-medium">תאריך מכירה</th>
+                    <th className="text-right p-3 font-medium">כמות נמכרה</th>
+                    <th className="text-right p-3 font-medium">מחיר ליחידה</th>
+                    <th className="text-right p-3 font-medium">רווח/הפסד</th>
+                    <th className="text-right p-3 font-medium">פעולות</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.map((transaction) => {
+                    const investmentAmount = calculateInvestmentAmount(transaction.quantity, transaction.buy_price, transaction.buy_fee);
+                    const profitLoss = transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit && transaction.sell_fee !== undefined
+                      ? calculateProfitLoss(transaction.quantity, transaction.buy_price, transaction.buy_fee, transaction.sell_quantity, transaction.sell_price_per_unit, transaction.sell_fee)
+                      : null;
+
+                    return (
+                      <tr key={transaction.id} className="border-b hover:bg-gray-50">
+                        <td className="text-right p-3 font-medium">
+                          <div className="flex items-center justify-end gap-2">
+                            {transaction.logo_url && (
+                              <img 
+                                src={transaction.logo_url} 
+                                alt={`${transaction.symbol} logo`}
+                                className="w-6 h-6 rounded"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <span>{transaction.symbol}</span>
+                          </div>
+                        </td>
+                        <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(transaction.buy_date)}</td>
+                        <td className="text-right p-3">{transaction.quantity.toLocaleString()}</td>
+                        <td className="text-right p-3">{formatCurrency(transaction.buy_price, transaction.buy_fee_currency)}</td>
+                        <td className="text-right p-3">{formatCurrency(transaction.buy_fee, transaction.buy_fee_currency)}</td>
+                        <td className="text-right p-3 font-medium">{formatCurrency(investmentAmount, transaction.buy_fee_currency)}</td>
+                        <td className="text-right p-3">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            transaction.status === 'open' 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-green-100 text-green-800'
+                          }`}>
+                            {transaction.status === 'open' ? 'פתוח' : 'נמכר'}
+                          </span>
+                        </td>
+                        <td className="text-right p-3">
+                          {transaction.sell_date ? formatDate(transaction.sell_date) : '—'}
+                        </td>
+                        <td className="text-right p-3">
+                          {transaction.sell_quantity ? transaction.sell_quantity.toLocaleString() : '—'}
+                        </td>
+                        <td className="text-right p-3">
+                          {transaction.sell_price_per_unit 
+                            ? formatCurrency(transaction.sell_price_per_unit, transaction.sell_fee_currency || 'USD')
+                            : '—'
+                          }
+                        </td>
+                        <td className="text-right p-3">
+                          {profitLoss ? (
+                            <span className={`font-medium ${profitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {profitLoss.percentage.toFixed(2)}% / {formatCurrency(profitLoss.amount, transaction.sell_fee_currency || 'USD')}
+                            </span>
+                          ) : '—'}
+                        </td>
+                        <td className="text-right p-3">
+                          <div className="flex gap-1">
+                            {transaction.status === 'open' && (
+                              <>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => editTransaction(transaction)}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => startSellTransaction(transaction)}
+                                  className="bg-green-50 hover:bg-green-100"
+                                >
+                                  מכור
+                                </Button>
+                              </>
+                            )}
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDeleteTransaction(transaction.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {transactions.length === 0 && (
+                    <tr>
+                      <td colSpan={12} className="text-center p-8 text-gray-500">
+                        אין עסקאות להצגה
                       </td>
                     </tr>
                   )}

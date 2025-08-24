@@ -21,6 +21,25 @@ export interface Conversion {
   target_currency: 'ILS' | 'USD'
 }
 
+export interface Transaction {
+  id: string
+  platform: string
+  symbol: string
+  logo_url?: string
+  buy_date: string
+  quantity: number
+  buy_price: number
+  buy_fee: number
+  buy_fee_currency: 'ILS' | 'USD'
+  sell_date?: string
+  sell_quantity?: number
+  sell_price_per_unit?: number
+  sell_price?: number // This will be calculated: sell_quantity * sell_price_per_unit
+  sell_fee?: number
+  sell_fee_currency?: 'ILS' | 'USD'
+  status: 'open' | 'closed' // open = לא נמכר, closed = נמכר
+}
+
 // Database Functions for Deposits
 export const getDeposits = async (platform: string): Promise<Deposit[]> => {
   console.log(`Fetching deposits for platform: ${platform}`);
@@ -144,6 +163,132 @@ export const deleteConversion = async (id: string): Promise<boolean> => {
   return true
 }
 
+// Database Functions for Transactions
+export const getTransactions = async (platform: string): Promise<Transaction[]> => {
+  console.log(`Fetching transactions for platform: ${platform}`);
+  
+  try {
+    const { data, error } = await supabase
+      .from('transactions')
+      .select('*')
+      .eq('platform', platform)
+      .order('created_at', { ascending: false }) // הוספה אחרונה קודם
+    
+    if (error) {
+      console.error(`Error fetching transactions for ${platform}:`, error);
+      return []
+    }
+    
+    console.log(`Transactions for ${platform}:`, data);
+    return data || []
+  } catch (error) {
+    console.error(`Exception fetching transactions for ${platform}:`, error);
+    return []
+  }
+}
+
+export const addTransaction = async (transaction: Omit<Transaction, 'id' | 'status'>): Promise<Transaction | null> => {
+  // Try to fetch logo for the symbol
+  let logo_url = null;
+  if (transaction.symbol) {
+    try {
+      const response = await fetch(`/api/stock-info?symbol=${transaction.symbol}`);
+      if (response.ok) {
+        const stockInfo = await response.json();
+        logo_url = stockInfo.logo_url;
+      }
+    } catch (error) {
+      console.error('Error fetching logo:', error);
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .insert({ ...transaction, status: 'open', logo_url })
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Error adding transaction:', error)
+    return null
+  }
+  return data
+}
+
+export const updateTransaction = async (id: string, transaction: Partial<Omit<Transaction, 'id'>>): Promise<Transaction | null> => {
+  // Try to fetch logo for the symbol if it changed
+  let logo_url = transaction.logo_url;
+  if (transaction.symbol && !logo_url) {
+    try {
+      const response = await fetch(`/api/stock-info?symbol=${transaction.symbol}`);
+      if (response.ok) {
+        const stockInfo = await response.json();
+        logo_url = stockInfo.logo_url;
+      }
+    } catch (error) {
+      console.error('Error fetching logo:', error);
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .update({ ...transaction, logo_url })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Error updating transaction:', error)
+    return null
+  }
+  return data
+}
+
+export const deleteTransaction = async (id: string): Promise<boolean> => {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('id', id)
+  
+  if (error) {
+    console.error('Error deleting transaction:', error)
+    return false
+  }
+  return true
+}
+
+export const sellTransaction = async (
+  id: string, 
+  sell_date: string, 
+  sell_quantity: number,
+  sell_price_per_unit: number,
+  sell_fee: number, 
+  sell_fee_currency: 'ILS' | 'USD' = 'USD'
+): Promise<Transaction | null> => {
+  const sell_price = sell_quantity * sell_price_per_unit
+  
+  const { data, error } = await supabase
+    .from('transactions')
+    .update({
+      sell_date,
+      sell_quantity,
+      sell_price_per_unit,
+      sell_price,
+      sell_fee,
+      sell_fee_currency,
+      status: 'closed'
+    })
+    .eq('id', id)
+    .select()
+    .single()
+  
+  if (error) {
+    console.error('Error selling transaction:', error)
+    return null
+  }
+  return data
+}
+
 // Helper function to calculate actual cash balance
 export const calculateActualCash = (deposits: Deposit[], conversions: Conversion[]) => {
   const totals = { ILS: 0, USD: 0 }
@@ -167,4 +312,35 @@ export const calculateActualCash = (deposits: Deposit[], conversions: Conversion
   })
   
   return totals
+}
+
+// Helper functions for transaction calculations
+export const calculateInvestmentAmount = (quantity: number, price: number, fee: number): number => {
+  return (quantity * price) + fee
+}
+
+export const calculateProfitLoss = (
+  buyQuantity: number, 
+  buyPrice: number, 
+  buyFee: number,
+  sellQuantity: number,
+  sellPricePerUnit: number, 
+  sellFee: number
+): { amount: number, percentage: number } => {
+  // Calculate investment for sold quantity only
+  const soldPortionInvestment = (sellQuantity / buyQuantity) * ((buyQuantity * buyPrice) + buyFee)
+  const sellAmount = (sellQuantity * sellPricePerUnit) - sellFee
+  const profitLossAmount = sellAmount - soldPortionInvestment
+  const profitLossPercentage = (profitLossAmount / soldPortionInvestment) * 100
+  
+  return {
+    amount: profitLossAmount,
+    percentage: profitLossPercentage
+  }
+}
+
+// Helper function to format currency display
+export const formatCurrency = (amount: number, currency: 'ILS' | 'USD'): string => {
+  const symbol = currency === 'USD' ? '$' : '₪'
+  return `${symbol}${amount.toLocaleString()}`
 } 
