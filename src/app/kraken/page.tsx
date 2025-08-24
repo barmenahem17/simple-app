@@ -23,15 +23,20 @@ import {
   calculateInvestmentAmount,
   calculateProfitLoss,
   formatCurrency,
+  getPlatformSettings,
+  calculateBuyFee,
+  calculateSellFee,
   type Deposit,
   type Conversion,
-  type Transaction
+  type Transaction,
+  type PlatformSettings
 } from "@/lib/database";
 
 export default function Kraken() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [conversions, setConversions] = useState<Conversion[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Load data from Supabase
@@ -39,14 +44,16 @@ export default function Kraken() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [depositsData, conversionsData, transactionsData] = await Promise.all([
+        const [depositsData, conversionsData, transactionsData, settingsData] = await Promise.all([
           getDeposits('kraken'),
           getConversions('kraken'),
-          getTransactions('kraken')
+          getTransactions('kraken'),
+          getPlatformSettings('kraken')
         ]);
         setDeposits(depositsData);
         setConversions(conversionsData);
         setTransactions(transactionsData);
+        setPlatformSettings(settingsData);
       } catch (error) {
         console.error('Error loading data:', error);
       } finally {
@@ -83,8 +90,7 @@ export default function Kraken() {
     symbol: "",
     buy_date: new Date().toISOString().split('T')[0],
     quantity: "",
-    buy_price: "",
-    buy_fee: ""
+    buy_price: ""
   });
 
   const [sellFormData, setSellFormData] = useState({
@@ -331,16 +337,16 @@ export default function Kraken() {
   // Transaction functions
   const handleAddTransaction = async () => {
     if (!transactionFormData.symbol || !transactionFormData.buy_date || 
-        !transactionFormData.quantity || !transactionFormData.buy_price || !transactionFormData.buy_fee) {
+        !transactionFormData.quantity || !transactionFormData.buy_price) {
       alert("אנא מלא את כל השדות הנדרשים");
       return;
     }
 
     const quantity = parseFloat(transactionFormData.quantity);
     const buy_price = parseFloat(transactionFormData.buy_price);
-    const buy_fee = parseFloat(transactionFormData.buy_fee);
+    const buy_fee = calculateBuyFee('kraken', platformSettings);
 
-    if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0 || isNaN(buy_fee) || buy_fee < 0) {
+    if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0) {
       alert("אנא הזן ערכים תקינים");
       return;
     }
@@ -361,8 +367,7 @@ export default function Kraken() {
         symbol: "",
         buy_date: new Date().toISOString().split('T')[0],
         quantity: "",
-        buy_price: "",
-        buy_fee: ""
+        buy_price: ""
       });
       setShowTransactionForm(false);
     } else {
@@ -376,21 +381,20 @@ export default function Kraken() {
       symbol: transaction.symbol,
       buy_date: transaction.buy_date,
       quantity: transaction.quantity.toString(),
-      buy_price: transaction.buy_price.toString(),
-      buy_fee: transaction.buy_fee.toString()
+      buy_price: transaction.buy_price.toString()
     });
     setShowTransactionForm(true);
   };
 
   const handleUpdateTransaction = async () => {
     if (!editingTransaction || !transactionFormData.symbol || !transactionFormData.buy_date || 
-        !transactionFormData.quantity || !transactionFormData.buy_price || !transactionFormData.buy_fee) return;
+        !transactionFormData.quantity || !transactionFormData.buy_price) return;
 
     const quantity = parseFloat(transactionFormData.quantity);
     const buy_price = parseFloat(transactionFormData.buy_price);
-    const buy_fee = parseFloat(transactionFormData.buy_fee);
+    const buy_fee = calculateBuyFee('kraken', platformSettings);
 
-    if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0 || isNaN(buy_fee) || buy_fee < 0) {
+    if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0) {
       alert("אנא הזן ערכים תקינים");
       return;
     }
@@ -413,8 +417,7 @@ export default function Kraken() {
         symbol: "",
         buy_date: new Date().toISOString().split('T')[0],
         quantity: "",
-        buy_price: "",
-        buy_fee: ""
+        buy_price: ""
       });
       setShowTransactionForm(false);
     } else {
@@ -434,23 +437,22 @@ export default function Kraken() {
     setSellFormData({
       sell_date: new Date().toISOString().split('T')[0],
       sell_quantity: transaction.quantity.toString(), // ברירת מחדל - כל הכמות
-      sell_price_per_unit: "",
-      sell_fee: ""
+      sell_price_per_unit: ""
     });
     setShowSellForm(true);
   };
 
   const handleSellTransaction = async () => {
-    if (!sellingTransaction || !sellFormData.sell_date || !sellFormData.sell_quantity || !sellFormData.sell_price_per_unit || !sellFormData.sell_fee) {
+    if (!sellingTransaction || !sellFormData.sell_date || !sellFormData.sell_quantity || !sellFormData.sell_price_per_unit) {
       alert("אנא מלא את כל השדות הנדרשים");
       return;
     }
 
     const sell_quantity = parseFloat(sellFormData.sell_quantity);
     const sell_price_per_unit = parseFloat(sellFormData.sell_price_per_unit);
-    const sell_fee = parseFloat(sellFormData.sell_fee);
+    const sell_fee = calculateSellFee('kraken', platformSettings);
 
-    if (isNaN(sell_quantity) || sell_quantity <= 0 || isNaN(sell_price_per_unit) || sell_price_per_unit <= 0 || isNaN(sell_fee) || sell_fee < 0) {
+    if (isNaN(sell_quantity) || sell_quantity <= 0 || isNaN(sell_price_per_unit) || sell_price_per_unit <= 0) {
       alert("אנא הזן ערכים תקינים");
       return;
     }
@@ -493,9 +495,7 @@ export default function Kraken() {
       symbol: "",
       buy_date: new Date().toISOString().split('T')[0],
       quantity: "",
-      buy_price: "",
-      buy_fee: "",
-      buy_fee_currency: "USD"
+      buy_price: ""
     });
   };
 
@@ -505,14 +505,15 @@ export default function Kraken() {
     setSellFormData({
       sell_date: new Date().toISOString().split('T')[0],
       sell_quantity: "",
-      sell_price_per_unit: "",
-      sell_fee: ""
+      sell_price_per_unit: ""
     });
   };
 
   return (
     <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold text-right mb-8">Kraken</h1>
+      <h1 className="text-3xl font-bold text-right mb-8">
+        {platformSettings?.display_name || 'Kraken'}
+      </h1>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <MetricCard
           title="שווי תיק כולל"
@@ -587,8 +588,8 @@ export default function Kraken() {
                       }}
                       className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                     >
-                      <option value="ILS">שקל</option>
-                      <option value="USD">דולר</option>
+                      <option value="ILS">₪ שקל</option>
+                      <option value="USD">$ דולר</option>
                     </select>
                   </div>
                 </div>
@@ -624,7 +625,7 @@ export default function Kraken() {
                     <tr key={deposit.id} className="border-b hover:bg-gray-50">
                       <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(deposit.date)}</td>
                       <td className="text-right p-3 font-medium">{deposit.amount.toLocaleString()}</td>
-                      <td className="text-right p-3">{deposit.currency === "ILS" ? "שקל" : "דולר"}</td>
+                      <td className="text-right p-3">{deposit.currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
                       <td className="text-right p-3">
                         <Button
                           variant="outline"
@@ -706,8 +707,8 @@ export default function Kraken() {
                       })}
                       className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
                     >
-                      <option value="ILS">שקל</option>
-                      <option value="USD">דולר</option>
+                      <option value="ILS">₪ שקל</option>
+                      <option value="USD">$ דולר</option>
                     </select>
                   </div>
                   <div>
@@ -731,7 +732,7 @@ export default function Kraken() {
                       className="w-full p-2 border rounded bg-gray-100"
                     >
                       <option value={conversionFormData.targetCurrency}>
-                        {conversionFormData.targetCurrency === "ILS" ? "שקל" : "דולר"}
+                        {conversionFormData.targetCurrency === "ILS" ? "₪ שקל" : "$ דולר"}
                       </option>
                     </select>
                   </div>
@@ -764,9 +765,9 @@ export default function Kraken() {
                     <tr key={conversion.id} className="border-b hover:bg-gray-50">
                       <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(conversion.date)}</td>
                       <td className="text-right p-3 font-medium">{conversion.source_amount.toLocaleString()}</td>
-                      <td className="text-right p-3">{conversion.source_currency === "ILS" ? "שקל" : "דולר"}</td>
+                      <td className="text-right p-3">{conversion.source_currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
                       <td className="text-right p-3">{conversion.exchange_rate}</td>
-                      <td className="text-right p-3">{conversion.target_currency === "ILS" ? "שקל" : "דולר"}</td>
+                      <td className="text-right p-3">{conversion.target_currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
                       <td className="text-right p-3">
                         <Button
                           variant="outline"
@@ -865,19 +866,7 @@ export default function Kraken() {
                       required
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1 text-right">עמלת קנייה ($)</label>
-                    <input
-                      type="number"
-                      placeholder="הזן עמלה"
-                      value={transactionFormData.buy_fee}
-                      onChange={(e) => setTransactionFormData({...transactionFormData, buy_fee: e.target.value})}
-                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      min="0"
-                      step="0.01"
-                      required
-                    />
-                  </div>
+
                 </div>
                 <div className="flex gap-2 justify-end">
                   <Button 
@@ -902,7 +891,7 @@ export default function Kraken() {
                 <h3 className="text-lg font-semibold mb-4 text-right">
                   מכירת {sellingTransaction.symbol} - זמין: {sellingTransaction.quantity} יחידות
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium mb-1 text-right">תאריך מכירה</label>
                     <input
@@ -941,19 +930,7 @@ export default function Kraken() {
                       required
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1 text-right">עמלת מכירה ($)</label>
-                    <input
-                      type="number"
-                      placeholder="הזן עמלת מכירה"
-                      value={sellFormData.sell_fee}
-                      onChange={(e) => setSellFormData({...sellFormData, sell_fee: e.target.value})}
-                      className="w-full p-3 text-lg border-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-200"
-                      min="0"
-                      step="0.01"
-                      required
-                    />
-                  </div>
+
                 </div>
                 {sellFormData.sell_quantity && sellFormData.sell_price_per_unit && (
                   <div className="mb-4 p-3 bg-blue-50 rounded-lg">

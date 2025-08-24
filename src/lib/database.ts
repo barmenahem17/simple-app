@@ -343,4 +343,113 @@ export const calculateProfitLoss = (
 export const formatCurrency = (amount: number, currency: 'ILS' | 'USD'): string => {
   const symbol = currency === 'USD' ? '$' : '₪'
   return `${symbol}${amount.toLocaleString()}`
+}
+
+// Platform Settings Interface
+export interface PlatformSettings {
+  id: string
+  platform: string
+  display_name: string
+  buy_fee_usd: number
+  sell_fee_usd: number
+  created_at: string
+  updated_at: string
+}
+
+// Database Functions for Platform Settings
+export const getPlatformSettings = async (platform: string): Promise<PlatformSettings | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('*')
+      .eq('platform', platform)
+      .single()
+    
+    if (error) {
+      console.error(`Error fetching platform settings for ${platform}:`, error)
+      return null
+    }
+    
+    return data
+  } catch (error) {
+    console.error(`Exception fetching platform settings for ${platform}:`, error)
+    return null
+  }
+}
+
+export const getAllPlatformSettings = async (): Promise<PlatformSettings[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .select('*')
+      .order('platform')
+    
+    if (error) {
+      console.error('Error fetching all platform settings:', error)
+      return []
+    }
+    
+    return data || []
+  } catch (error) {
+    console.error('Exception fetching all platform settings:', error)
+    return []
+  }
+}
+
+export const upsertPlatformSettings = async (settings: Omit<PlatformSettings, 'id' | 'created_at' | 'updated_at'>): Promise<PlatformSettings | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('platform_settings')
+      .upsert(settings, { onConflict: 'platform' })
+      .select()
+      .single()
+    
+    if (error) {
+      console.error('Error upserting platform settings:', error)
+      return null
+    }
+    
+    return data
+  } catch (error) {
+    console.error('Exception upserting platform settings:', error)
+    return null
+  }
+}
+
+export const initializeDefaultSettings = async (): Promise<void> => {
+  const platforms = ['kraken', 'ibkr', 'extrade']
+  const defaultNames = {
+    kraken: 'Kraken',
+    ibkr: 'IBKR',
+    extrade: 'Extrade'
+  }
+  
+  for (const platform of platforms) {
+    const existingSettings = await getPlatformSettings(platform)
+    if (!existingSettings) {
+      await upsertPlatformSettings({
+        platform,
+        display_name: defaultNames[platform as keyof typeof defaultNames],
+        buy_fee_usd: 1.00, // $1 default
+        sell_fee_usd: 1.00  // $1 default
+      })
+    }
+  }
+}
+
+// Helper function to calculate fees based on settings
+export const calculateBuyFee = (platform: string, settings?: PlatformSettings): number => {
+  if (settings) {
+    return settings.buy_fee_usd;
+  }
+  // Default $1 if no settings
+  return 1.00;
+}
+
+export const calculateSellFee = (platform: string, settings?: PlatformSettings): number => {
+  if (settings) {
+    return settings.sell_fee_usd;
+  }
+  // Default $1 if no settings
+  return 1.00;
 } 

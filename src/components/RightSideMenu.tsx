@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import {
   Sheet,
   SheetContent,
@@ -9,6 +10,7 @@ import {
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { Settings, Home, TrendingUp, BarChart3, Coins } from "lucide-react";
+import { getAllPlatformSettings, type PlatformSettings } from "@/lib/database";
 
 interface RightSideMenuProps {
   isOpen: boolean;
@@ -16,11 +18,30 @@ interface RightSideMenuProps {
 }
 
 export function RightSideMenu({ isOpen, onClose }: RightSideMenuProps) {
+  const [platformSettings, setPlatformSettings] = useState<PlatformSettings[]>([]);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await getAllPlatformSettings();
+        setPlatformSettings(settings);
+      } catch (error) {
+        console.error('Error loading platform settings:', error);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const getDisplayName = (platform: string) => {
+    const setting = platformSettings.find(s => s.platform === platform);
+    return setting?.display_name || platform.toUpperCase();
+  };
+
   const mainLinks = [
     { href: "/", label: "דף הבית", icon: Home },
-    { href: "/extrade", label: "Extrade", icon: TrendingUp },
-    { href: "/ibkr", label: "IBKR", icon: BarChart3 },
-    { href: "/kraken", label: "Kraken", icon: Coins },
+    { href: "/extrade", label: getDisplayName('extrade'), icon: TrendingUp },
+    { href: "/ibkr", label: getDisplayName('ibkr'), icon: BarChart3 },
+    { href: "/kraken", label: getDisplayName('kraken'), icon: Coins },
   ];
 
   return (
