@@ -7,6 +7,11 @@ import { ExchangeRate } from "@/components/ExchangeRate";
 
 export function AppTopBar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [primaryCurrency, setPrimaryCurrency] = useState<'USD' | 'ILS'>('USD');
+
+  const toggleCurrency = () => {
+    setPrimaryCurrency(prev => prev === 'USD' ? 'ILS' : 'USD');
+  };
 
   return (
     <>
@@ -29,8 +34,19 @@ export function AppTopBar() {
             </Button>
           </div>
           
-          {/* שער החליפין בצד שמאל */}
-          <ExchangeRate />
+          {/* כפתור בחירת מטבע ראשי ושער החליפין בצד שמאל */}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleCurrency}
+              className="px-3 py-1 hover:bg-blue-50 border-blue-200 text-blue-700 font-medium"
+              title="החלף מטבע ראשי"
+            >
+              {primaryCurrency === 'USD' ? '$' : '₪'}
+            </Button>
+            <ExchangeRate />
+          </div>
         </div>
       </div>
       <RightSideMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} />

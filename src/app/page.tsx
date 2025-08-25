@@ -118,9 +118,9 @@ export default function Home() {
   }, []);
 
   // Calculate portfolio data for each platform using new functions
-  const krakenPortfolio = calculateTotalPortfolioValue(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, 3.5);
-  const ibkrPortfolio = calculateTotalPortfolioValue(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, 3.5);
-  const extradePortfolio = calculateTotalPortfolioValue(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, 3.5);
+  const krakenPortfolio = calculateTotalPortfolioValue(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, 3.5, undefined);
+  const ibkrPortfolio = calculateTotalPortfolioValue(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, 3.5, undefined);
+  const extradePortfolio = calculateTotalPortfolioValue(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, 3.5, undefined);
 
   // Calculate cash for each platform
   const krakenCash = calculateCurrentCash(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined);
@@ -128,9 +128,9 @@ export default function Home() {
   const extradeCash = calculateCurrentCash(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined);
 
   // Calculate profit/loss for each platform
-  const krakenProfitLoss = calculateOverallProfitLoss(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, 3.5);
-  const ibkrProfitLoss = calculateOverallProfitLoss(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, 3.5);
-  const extradeProfitLoss = calculateOverallProfitLoss(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, 3.5);
+  const krakenProfitLoss = calculateOverallProfitLoss(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, 3.5, undefined);
+  const ibkrProfitLoss = calculateOverallProfitLoss(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, 3.5, undefined);
+  const extradeProfitLoss = calculateOverallProfitLoss(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, 3.5, undefined);
 
   // Calculate totals
   const totalPortfolioILS = krakenPortfolio.totalILS + ibkrPortfolio.totalILS + extradePortfolio.totalILS;

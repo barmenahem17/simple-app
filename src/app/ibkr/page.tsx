@@ -164,10 +164,10 @@ export default function IBKR() {
   const totalUSD = currentCash.USD;
 
   // Calculate portfolio value and profit/loss
-  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined);
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined, 3.5, stockPrices);
   const totalPortfolioILS = portfolioValue.totalILS;
   const totalPortfolioUSD = portfolioValue.totalUSD;
-  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined);
+  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined, 3.5, stockPrices);
 
   if (loading) {
     return (

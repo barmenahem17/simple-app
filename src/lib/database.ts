@@ -351,7 +351,8 @@ export const calculateTotalPortfolioValue = (
   conversions: Conversion[], 
   transactions: Transaction[],
   platformSettings?: PlatformSettings,
-  exchangeRate: number = 3.5 // Default ILS to USD rate
+  exchangeRate: number = 3.5, // Default ILS to USD rate
+  currentPrices?: {[symbol: string]: number}
 ): { totalILS: number, totalUSD: number, investmentsUSD: number } => {
   const cash = calculateCurrentCash(deposits, conversions, transactions, platformSettings)
   
@@ -359,8 +360,11 @@ export const calculateTotalPortfolioValue = (
   const investmentsUSD = transactions
     .filter(t => t.status === 'open')
     .reduce((total, transaction) => {
-      // For open transactions, use buy price as current value
-      return total + (transaction.quantity * transaction.buy_price)
+      // For open transactions, use current price if available, otherwise use buy price
+      const currentPrice = currentPrices && currentPrices[transaction.symbol] 
+        ? currentPrices[transaction.symbol] 
+        : transaction.buy_price
+      return total + (transaction.quantity * currentPrice)
     }, 0)
   
   return {
@@ -376,11 +380,15 @@ export const calculateOverallProfitLoss = (
   conversions: Conversion[], 
   transactions: Transaction[],
   platformSettings?: PlatformSettings,
-  exchangeRate: number = 3.5
+  exchangeRate: number = 3.5,
+  currentPrices?: {[symbol: string]: number}
 ): { amount: number, percentage: number } => {
+  // Get platform name from first transaction or default to 'extrade'
+  const platform = transactions.length > 0 ? transactions[0].platform : 'extrade';
+  
   // Calculate total money invested in transactions (buy costs)
   const totalInvestedInTransactions = transactions.reduce((total, transaction) => {
-    const buyFee = platformSettings ? calculateBuyFee('extrade', platformSettings) : transaction.buy_fee
+    const buyFee = platformSettings ? calculateBuyFee(platform, platformSettings) : transaction.buy_fee
     const totalBuyCost = (transaction.quantity * transaction.buy_price) + buyFee
     return total + totalBuyCost
   }, 0)
@@ -389,7 +397,7 @@ export const calculateOverallProfitLoss = (
   const totalReceivedFromSales = transactions
     .filter(t => t.status === 'closed' && t.sell_quantity && t.sell_price_per_unit)
     .reduce((total, transaction) => {
-      const sellFee = platformSettings ? calculateSellFee('extrade', platformSettings) : (transaction.sell_fee || 0)
+      const sellFee = platformSettings ? calculateSellFee(platform, platformSettings) : (transaction.sell_fee || 0)
       const sellProceeds = (transaction.sell_quantity! * transaction.sell_price_per_unit!) - sellFee
       return total + sellProceeds
     }, 0)
@@ -398,8 +406,11 @@ export const calculateOverallProfitLoss = (
   const currentValueOfOpenPositions = transactions
     .filter(t => t.status === 'open')
     .reduce((total, transaction) => {
-      // For open positions, we use the buy price as current value
-      return total + (transaction.quantity * transaction.buy_price)
+      // For open positions, use current price if available, otherwise use buy price
+      const currentPrice = currentPrices && currentPrices[transaction.symbol] 
+        ? currentPrices[transaction.symbol] 
+        : transaction.buy_price
+      return total + (transaction.quantity * currentPrice)
     }, 0)
   
   // Total current value = money from sales + current value of open positions
@@ -409,7 +420,7 @@ export const calculateOverallProfitLoss = (
   const profitLossAmount = totalCurrentValue - totalInvestedInTransactions
   
   // Calculate total portfolio value for percentage calculation
-  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings, exchangeRate)
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings, exchangeRate, currentPrices)
   const totalPortfolioValue = portfolioValue.totalUSD + (portfolioValue.totalILS / exchangeRate)
   
   // Calculate profit/loss percentage relative to total portfolio value

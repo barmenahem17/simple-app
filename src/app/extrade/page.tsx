@@ -208,12 +208,12 @@ export default function Extrade() {
   const totalUSD = actualCash.USD;
 
   // חישוב שווי תיק כולל
-  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined);
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined, 3.5, stockPrices);
   const totalPortfolioILS = portfolioValue.totalILS;
   const totalPortfolioUSD = portfolioValue.totalUSD;
 
   // חישוב רווח/הפסד כולל
-  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined);
+  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined, 3.5, stockPrices);
 
   // פונקציה לרענון מחירים מה-API
   const refreshStockPrices = async () => {
