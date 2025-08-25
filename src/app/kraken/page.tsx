@@ -41,6 +41,10 @@ export default function Kraken() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stockPrices, setStockPrices] = useState<{[symbol: string]: number}>({});
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [primaryCurrency, setPrimaryCurrency] = useState<'USD' | 'ILS'>('USD');
+  const [exchangeRate, setExchangeRate] = useState<number>(3.5); // Default rate
 
   // Load data from Supabase
   useEffect(() => {
@@ -66,6 +70,103 @@ export default function Kraken() {
 
     loadData();
   }, []);
+
+  // Function to get current exchange rate
+  const fetchExchangeRate = async () => {
+    try {
+      const response = await fetch('/api/exchange-rate');
+      const data = await response.json();
+      if (data.success) {
+        setExchangeRate(data.rate);
+      }
+    } catch (error) {
+      console.error('Error fetching exchange rate:', error);
+      // Keep default rate on error
+    }
+  };
+
+  // Load exchange rate on component mount
+  useEffect(() => {
+    fetchExchangeRate();
+  }, []);
+
+  // Helper functions for currency conversion
+  const convertToUSD = (amount: number, currency: 'ILS' | 'USD'): number => {
+    return currency === 'ILS' ? amount / exchangeRate : amount;
+  };
+
+  const convertToILS = (amount: number, currency: 'ILS' | 'USD'): number => {
+    return currency === 'USD' ? amount * exchangeRate : amount;
+  };
+
+  const convertToPrimaryCurrency = (amount: number, currency: 'ILS' | 'USD'): number => {
+    if (primaryCurrency === 'USD') {
+      return convertToUSD(amount, currency);
+    } else {
+      return convertToILS(amount, currency);
+    }
+  };
+
+  const toggleCurrency = () => {
+    setPrimaryCurrency(prev => prev === 'USD' ? 'ILS' : 'USD');
+  };
+
+  // Helper function to format currency in primary currency
+  const formatCurrencyInPrimary = (amount: number, originalCurrency: 'ILS' | 'USD' = 'USD'): string => {
+    const convertedAmount = convertToPrimaryCurrency(amount, originalCurrency);
+    const symbol = primaryCurrency === 'USD' ? '$' : '₪';
+    
+    // Handle NaN or Infinity values
+    if (!isFinite(convertedAmount) || isNaN(convertedAmount)) {
+      return `${symbol}0.00`;
+    }
+    
+    return `${symbol}${convertedAmount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+  };
+
+  // Calculate stocks profit/loss only
+  const calculateStocksProfitLoss = (): { amount: number, percentage: number, totalCost: number } => {
+    let totalStockPnL = 0;
+    let totalCost = 0;
+
+    transactions
+      .filter(t => t.status === 'open') // רק פוזיציות פתוחות
+      .forEach(transaction => {
+        // קבלת מחיר נוכחי
+        const currentPrice = stockPrices[transaction.symbol];
+        
+        if (!currentPrice || currentPrice <= 0) {
+          // אם אין מחיר נוכחי, דלג על הנייר
+          return;
+        }
+
+        // חישוב עלות כוללת (מחיר קנייה + עמלות)
+        const buyFee = calculateBuyFee('kraken', platformSettings || undefined);
+        const totalCostUSD = (transaction.quantity * transaction.buy_price) + buyFee;
+        
+        // שווי שוק נוכחי
+        const currentValueUSD = transaction.quantity * currentPrice;
+        
+        // רווח/הפסד על הנייר
+        const stockPnLUSD = currentValueUSD - totalCostUSD;
+        
+        // המרה למטבע הראשי
+        const stockPnLInPrimary = convertToPrimaryCurrency(stockPnLUSD, 'USD');
+        const totalCostInPrimary = convertToPrimaryCurrency(totalCostUSD, 'USD');
+        
+        totalStockPnL += stockPnLInPrimary;
+        totalCost += totalCostInPrimary;
+      });
+
+    // חישוב אחוזים
+    const percentage = totalCost > 0 ? (totalStockPnL / totalCost) * 100 : 0;
+
+    return {
+      amount: totalStockPnL,
+      percentage: percentage,
+      totalCost: totalCost
+    };
+  };
 
   const [showForm, setShowForm] = useState(false);
   const [showConversionForm, setShowConversionForm] = useState(false);
@@ -103,8 +204,6 @@ export default function Kraken() {
   });
 
   // New states for advanced functionality
-  const [stockPrices, setStockPrices] = useState<{[symbol: string]: number}>({});
-  const [refreshingPrices, setRefreshingPrices] = useState(false);
   const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
   const [deletingTransaction, setDeletingTransaction] = useState<string | null>(null);
   const [actionDialogTransaction, setActionDialogTransaction] = useState<Transaction | null>(null);
@@ -164,21 +263,115 @@ export default function Kraken() {
   const totalUSD = currentCash.USD;
 
   // Calculate portfolio value and profit/loss
-  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined, 3.5, stockPrices);
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined, exchangeRate, stockPrices);
   const totalPortfolioILS = portfolioValue.totalILS;
   const totalPortfolioUSD = portfolioValue.totalUSD;
-  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined, 3.5, stockPrices);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-lg text-gray-600">טוען נתונים...</p>
-        </div>
-      </div>
-    );
-  }
+  // Calculate total cash in primary currency
+  const totalCashInPrimaryCurrency = convertToPrimaryCurrency(totalILS, 'ILS') + convertToPrimaryCurrency(totalUSD, 'USD');
+
+  // Calculate NAV (Net Asset Value)
+  const calculateNAV = (): number => {
+    if (!exchangeRate || exchangeRate <= 0) {
+      console.error("שער דולר/שקל לא זמין");
+      return totalCashInPrimaryCurrency;
+    }
+
+    let totalStocksValueInPrimaryCurrency = 0;
+    transactions
+      .filter(t => t.status === 'open')
+      .forEach(transaction => {
+        const currentPrice = stockPrices[transaction.symbol];
+        if (!currentPrice || currentPrice <= 0) {
+          return;
+        }
+        const stockValueUSD = transaction.quantity * currentPrice;
+        const stockValueInPrimaryCurrency = convertToPrimaryCurrency(stockValueUSD, 'USD');
+        totalStocksValueInPrimaryCurrency += stockValueInPrimaryCurrency;
+      });
+
+    return totalCashInPrimaryCurrency + totalStocksValueInPrimaryCurrency;
+  };
+
+  const navValue = calculateNAV();
+
+  // Calculate Total PnL (since inception)
+  const calculateTotalPnL = (): { amount: number, percentage: number, netContributions: number, hasRateWarning: boolean } => {
+    let netContributions = 0;
+    let hasRateWarning = false;
+
+    deposits.forEach(deposit => {
+      if (deposit.currency !== primaryCurrency && (!exchangeRate || exchangeRate <= 0)) {
+        hasRateWarning = true;
+      }
+      const contributionInPrimary = convertToPrimaryCurrency(deposit.amount, deposit.currency);
+      if (!isNaN(contributionInPrimary) && isFinite(contributionInPrimary)) {
+        netContributions += contributionInPrimary;
+      }
+    });
+
+    const currentNAV = navValue;
+    const totalPnLAmount = currentNAV - netContributions;
+    let totalPnLPercentage = 0;
+    if (netContributions > 0) {
+      totalPnLPercentage = (totalPnLAmount / netContributions) * 100;
+      if (!isFinite(totalPnLPercentage)) {
+        totalPnLPercentage = 0;
+      }
+    }
+
+    return {
+      amount: totalPnLAmount,
+      percentage: totalPnLPercentage,
+      netContributions: netContributions,
+      hasRateWarning: hasRateWarning
+    };
+  };
+
+  const totalPnL = calculateTotalPnL();
+
+  // חישובי רווח/הפסד
+  const stocksProfitLoss = calculateStocksProfitLoss();
+  
+  // חישוב רווח/הפסד מטבעות כהפרש
+  const calculateFXProfitLoss = (): { amount: number } => {
+    // FXPnL = TotalPnL - StockPnL
+    const fxPnLAmount = totalPnL.amount - stocksProfitLoss.amount;
+    
+    return {
+      amount: fxPnLAmount
+    };
+  };
+
+  const fxProfitLoss = calculateFXProfitLoss();
+
+  // חישוב סך העמלות ששולמו
+  const calculateTotalFees = (): { totalFees: number, buyFees: number, sellFees: number } => {
+    let totalBuyFees = 0;
+    let totalSellFees = 0;
+
+    transactions.forEach(transaction => {
+      // עמלות קנייה
+      if (transaction.buy_fee) {
+        totalBuyFees += transaction.buy_fee;
+      }
+      
+      // עמלות מכירה
+      if (transaction.sell_fee) {
+        totalSellFees += transaction.sell_fee;
+      }
+    });
+
+    const totalFees = totalBuyFees + totalSellFees;
+    
+    return {
+      totalFees: totalFees,
+      buyFees: totalBuyFees,
+      sellFees: totalSellFees
+    };
+  };
+
+  const totalFees = calculateTotalFees();
 
   const handleAddDeposit = async () => {
     console.log("addDeposit called with:", formData);
@@ -593,34 +786,136 @@ export default function Kraken() {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-8">
+      {loading ? (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-lg text-gray-600">טוען נתונים...</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-right">
           {platformSettings?.display_name || 'Kraken'}
         </h1>
-        <Button 
-          onClick={refreshStockPrices}
-          disabled={refreshingPrices || transactions.length === 0}
-          className="bg-blue-600 hover:bg-blue-700"
-          title={transactions.length === 0 ? "אין עסקאות לרענון" : "רענן מחירי מניות"}
-        >
-          {refreshingPrices ? 'מעדכן...' : 'רענן מחירים'}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleCurrency}
+            className="px-3 py-1 hover:bg-blue-50 border-blue-200 text-blue-700 font-medium"
+            title="החלף מטבע ראשי"
+          >
+            {primaryCurrency === 'USD' ? '$' : '₪'}
+          </Button>
+          <Button 
+            onClick={refreshStockPrices}
+            disabled={refreshingPrices || transactions.length === 0}
+            className="bg-blue-600 hover:bg-blue-700"
+            title={transactions.length === 0 ? "אין עסקאות לרענון" : "רענן מחירי מניות"}
+          >
+            {refreshingPrices ? 'מעדכן...' : 'רענן מחירים'}
+          </Button>
+        </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-        <MetricCard
-          title="שווי תיק כולל"
-          value={`₪ ${Math.round(totalPortfolioILS)} | $ ${Math.round(totalPortfolioUSD)}`}
-        />
-        <MetricCard
-          title="רווח/הפסד (באחוזים ובמטבע) על כל התקופה"
-          value={`${profitLoss.percentage.toFixed(2)}% / ${formatCurrency(profitLoss.amount, 'USD')}`}
-          valueClassName={profitLoss.amount >= 0 ? "text-green-600" : "text-red-600"}
-        />
-        <MetricCard
-          title="מזומן בשקל ומזומן בדולר"
-          value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
-        />
-      </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+          <MetricCard
+            title="שווי תיק כולל (NAV)"
+            value={
+              exchangeRate > 0
+                ? `${primaryCurrency === 'USD' ? '$' : '₪'} ${navValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
+                : "שער דולר/שקל לא זמין"
+            }
+          />
+          <MetricCard
+            title="סך עמלות"
+            value={
+              <div className="text-center">
+                <div className="text-2xl font-bold mb-1 text-orange-600">
+                  {primaryCurrency === 'USD' ? '$' : '₪'} {convertToPrimaryCurrency(totalFees.totalFees, 'USD').toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+                <div className="text-xs text-gray-600">
+                  קנייה: {primaryCurrency === 'USD' ? '$' : '₪'} {convertToPrimaryCurrency(totalFees.buyFees, 'USD').toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+                <div className="text-xs text-gray-600">
+                  מכירה: {primaryCurrency === 'USD' ? '$' : '₪'} {convertToPrimaryCurrency(totalFees.sellFees, 'USD').toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+              </div>
+            }
+            valueClassName="text-orange-600"
+          />
+          <MetricCard
+            title="רווח/הפסד כולל"
+            value={
+              <div className="text-center">
+                <div className={`text-2xl font-bold mb-1 ${totalPnL.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {primaryCurrency === 'USD' ? '$' : '₪'} {totalPnL.amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+                {totalPnL.netContributions > 0 && (
+                  <div className={`text-sm font-medium ${totalPnL.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {totalPnL.percentage >= 0 ? '+' : ''}{totalPnL.percentage.toFixed(2)}%
+                  </div>
+                )}
+                {totalPnL.hasRateWarning && (
+                  <div className="text-xs text-orange-500 mt-1">
+                    שער חסר
+                  </div>
+                )}
+              </div>
+            }
+            valueClassName={totalPnL.amount >= 0 ? "text-green-600" : "text-red-600"}
+          />
+          <MetricCard
+            title="רווח/הפסד מטבעות"
+            value={
+              <div className="text-center">
+                <div className={`text-2xl font-bold mb-1 ${fxProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {primaryCurrency === 'USD' ? '$' : '₪'} {fxProfitLoss.amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+                <div className="text-xs text-gray-600">
+                  השפעת שער מט&ldquo;ח
+                </div>
+              </div>
+            }
+            valueClassName={fxProfitLoss.amount >= 0 ? "text-green-600" : "text-red-600"}
+          />
+          <MetricCard
+            title="רווח/הפסד מניות"
+            value={
+              <div className="text-center">
+                <div className={`text-lg font-bold mb-1 ${stocksProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {primaryCurrency === 'USD' ? '$' : '₪'} {stocksProfitLoss.amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+                <div className={`text-sm font-medium ${stocksProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {stocksProfitLoss.percentage >= 0 ? '+' : ''}{stocksProfitLoss.percentage.toFixed(2)}%
+                </div>
+                <div className="text-xs text-gray-600 mt-1">
+                  עלות: {primaryCurrency === 'USD' ? '$' : '₪'} {stocksProfitLoss.totalCost.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+              </div>
+            }
+            valueClassName={stocksProfitLoss.amount >= 0 ? "text-green-600" : "text-red-600"}
+          />
+        </div>
+
+        {/* מזומן - שורה נפרדת */}
+        <div className="grid grid-cols-1 md:grid-cols-1 gap-6 mb-8">
+          <MetricCard
+            title="מזומן זמין"
+            value={
+              <div className="text-center">
+                <div className="text-3xl font-bold mb-3">
+                  {primaryCurrency === 'USD' ? '$' : '₪'} {totalCashInPrimaryCurrency.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+                <div className="text-sm text-gray-600">
+                  יתרות מקוריות: ${totalUSD.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} | ₪{totalILS.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                </div>
+              </div>
+            }
+          />
+        </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
@@ -716,7 +1011,9 @@ export default function Kraken() {
                   {deposits.map((deposit) => (
                     <tr key={deposit.id} className="border-b hover:bg-gray-50">
                       <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(deposit.date)}</td>
-                      <td className="text-right p-3 font-medium">{deposit.amount.toLocaleString()}</td>
+                      <td className="text-right p-3 font-medium">
+                        {deposit.currency === "ILS" ? "₪" : "$"} {deposit.amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                      </td>
                       <td className="text-right p-3">{deposit.currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
                       <td className="text-right p-3">
                         <Button
@@ -848,7 +1145,7 @@ export default function Kraken() {
                     <th className="text-right p-3 font-medium">סכום מקור</th>
                     <th className="text-right p-3 font-medium">מטבע מקור</th>
                     <th className="text-right p-3 font-medium">שער המרה</th>
-                    <th className="text-right p-3 font-medium">מטבע יעד</th>
+                    <th className="text-right p-3 font-medium">סכום יעד</th>
                     <th className="text-right p-3 font-medium">פעולות</th>
                   </tr>
                 </thead>
@@ -856,10 +1153,20 @@ export default function Kraken() {
                   {conversions.map((conversion) => (
                     <tr key={conversion.id} className="border-b hover:bg-gray-50">
                       <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(conversion.date)}</td>
-                      <td className="text-right p-3 font-medium">{conversion.source_amount.toLocaleString()}</td>
-                      <td className="text-right p-3">{conversion.source_currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
+                      <td className="text-right p-3 font-medium">
+                        {conversion.source_amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} {conversion.source_currency === "ILS" ? "₪" : "$"}
+                      </td>
+                      <td className="text-right p-3">{conversion.source_currency === "ILS" ? "₪ שקל" : "$ דولר"}</td>
                       <td className="text-right p-3">{conversion.exchange_rate}</td>
-                      <td className="text-right p-3">{conversion.target_currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
+                      <td className="text-right p-3 font-medium">
+                        {(() => {
+                          const targetAmount = conversion.source_currency === conversion.target_currency 
+                            ? conversion.source_amount 
+                            : conversion.source_amount * conversion.exchange_rate;
+                          const targetCurrencySymbol = conversion.target_currency === "ILS" ? "₪" : "$";
+                          return `${targetAmount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} ${targetCurrencySymbol}`;
+                        })()}
+                      </td>
                       <td className="text-right p-3">
                         <Button
                           variant="outline"
@@ -1122,9 +1429,9 @@ export default function Kraken() {
                         <td className="text-center p-3">
                           <div className="flex flex-col justify-center h-full items-center">
                             <div className="text-sm leading-tight text-center">
-                              <div className="font-medium">קנייה: {formatCurrency(transaction.buy_price, 'USD')}</div>
+                              <div className="font-medium">קנייה: {formatCurrencyInPrimary(transaction.buy_price)}</div>
                               {transaction.status === 'closed' && transaction.sell_price_per_unit && (
-                                <div className="font-medium">מכירה: {formatCurrency(transaction.sell_price_per_unit, 'USD')}</div>
+                                <div className="font-medium">מכירה: {formatCurrencyInPrimary(transaction.sell_price_per_unit)}</div>
                               )}
                             </div>
                           </div>
@@ -1134,7 +1441,7 @@ export default function Kraken() {
                         <td className="text-center p-3">
                           <div className="flex flex-col justify-center h-full items-center">
                             <div className="text-sm font-medium">
-                              {formatCurrency(buyFee + (transaction.status === 'closed' ? sellFee : 0), 'USD')}
+                              {formatCurrencyInPrimary(buyFee + (transaction.status === 'closed' ? sellFee : 0))}
                             </div>
                           </div>
                         </td>
@@ -1142,7 +1449,7 @@ export default function Kraken() {
                         {/* סכום השקעה */}
                         <td className="text-center p-3 font-medium">
                           <div className="flex flex-col justify-center h-full items-center">
-                            {formatCurrency(investmentAmount, 'USD')}
+                            {formatCurrencyInPrimary(investmentAmount)}
                           </div>
                         </td>
                         
@@ -1167,7 +1474,7 @@ export default function Kraken() {
                                         {transactionProfitLoss.percentage.toFixed(2)}%
                                       </div>
                                       <div className={`text-xs ${transactionProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                        {formatCurrency(transactionProfitLoss.amount, 'USD')}
+                                        {formatCurrencyInPrimary(transactionProfitLoss.amount)}
                                       </div>
                                     </>
                                   );
@@ -1180,7 +1487,7 @@ export default function Kraken() {
                                   {(((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount) / investmentAmount * 100).toFixed(2)}%
                                 </div>
                                 <div className={`text-xs ${(transaction.quantity * stockPrices[transaction.symbol]) >= investmentAmount ? 'text-green-600' : 'text-red-600'}`}>
-                                  {formatCurrency((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount, 'USD')}
+                                  {formatCurrencyInPrimary((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount)}
                                 </div>
                               </div>
                             ) : (
@@ -1195,14 +1502,14 @@ export default function Kraken() {
                             {transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit ? (
                               // עסקה נמכרה - מחיר מכירה * כמות - עמלות
                               <span className={`${profitLoss && profitLoss.amount >= 0 ? 'text-green-600' : profitLoss && profitLoss.amount < 0 ? 'text-red-600' : ''}`}>
-                                {formatCurrency((transaction.sell_quantity * transaction.sell_price_per_unit) - buyFee - sellFee, 'USD')}
+                                {formatCurrencyInPrimary((transaction.sell_quantity * transaction.sell_price_per_unit) - buyFee - sellFee)}
                               </span>
                             ) : transaction.status === 'open' && stockPrices[transaction.symbol] ? (
                               // עסקה פתוחה - מחיר נוכחי * כמות - עמלת קנייה (צבע שחור)
                               <span>
                                 {(() => {
                                   console.log(`Stock price for ${transaction.symbol}:`, stockPrices[transaction.symbol]);
-                                  return formatCurrency((transaction.quantity * stockPrices[transaction.symbol]) - buyFee, 'USD');
+                                  return formatCurrencyInPrimary((transaction.quantity * stockPrices[transaction.symbol]) - buyFee);
                                 })()}
                               </span>
                             ) : (
@@ -1293,6 +1600,8 @@ export default function Kraken() {
           </div>
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   );
 }
