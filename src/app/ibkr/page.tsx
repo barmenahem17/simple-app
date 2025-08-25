@@ -4,7 +4,8 @@ import { MetricCard } from "@/components/MetricCard";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trash2, Edit } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Trash2, Edit, Eye } from "lucide-react";
 import { 
   getDeposits, 
   addDeposit, 
@@ -19,7 +20,9 @@ import {
   updateTransaction,
   deleteTransaction,
   sellTransaction,
-  calculateActualCash,
+  calculateCurrentCash,
+  calculateTotalPortfolioValue,
+  calculateOverallProfitLoss,
   calculateInvestmentAmount,
   calculateProfitLoss,
   formatCurrency,
@@ -99,19 +102,72 @@ export default function IBKR() {
     sell_price_per_unit: ""
   });
 
+  // New states for advanced functionality
+  const [stockPrices, setStockPrices] = useState<{[symbol: string]: number}>({});
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [viewingTransaction, setViewingTransaction] = useState<Transaction | null>(null);
+  const [deletingTransaction, setDeletingTransaction] = useState<string | null>(null);
+  const [actionDialogTransaction, setActionDialogTransaction] = useState<Transaction | null>(null);
+  const [actionDialogMode, setActionDialogMode] = useState<'menu' | 'sell' | 'edit'>('menu');
+
   // Format date for display (dd/mm/yyyy)
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
+    return date.toLocaleDateString('he-IL');
   };
 
+  // פונקציה לרענון מחירים מה-API
+  const refreshStockPrices = async () => {
+    if (transactions.length === 0) {
+      alert("אין עסקאות לרענון מחירים");
+      return;
+    }
+    
+    console.log('Refreshing stock prices...');
+    setRefreshingPrices(true);
+    const symbols = [...new Set(transactions.map(t => t.symbol))];
+    console.log('Symbols to fetch:', symbols);
+    const pricesData: {[symbol: string]: number} = {};
+    
+    for (const symbol of symbols) {
+      try {
+        console.log(`Fetching price for ${symbol}...`);
+        const response = await fetch(`/api/stock-price?symbol=${symbol}`);
+        console.log(`Response status for ${symbol}:`, response.status);
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`Price data for ${symbol}:`, data);
+          pricesData[symbol] = data.price;
+        } else {
+          console.error(`Failed to fetch price for ${symbol}:`, response.status);
+        }
+      } catch (error) {
+        console.error(`Error loading price for ${symbol}:`, error);
+      }
+    }
+    
+    console.log('Final prices data:', pricesData);
+    setStockPrices(pricesData);
+    setRefreshingPrices(false);
+  };
+
+  // Load stock data on component mount and when transactions change
+  useEffect(() => {
+    if (transactions.length > 0) {
+      refreshStockPrices();
+    }
+  }, [transactions]);
+
   // Calculate actual cash for this platform
-  const currentCash = calculateActualCash(deposits, conversions);
+  const currentCash = calculateCurrentCash(deposits, conversions, transactions, platformSettings || undefined);
   const totalILS = currentCash.ILS;
   const totalUSD = currentCash.USD;
+
+  // Calculate portfolio value and profit/loss
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined);
+  const totalPortfolioILS = portfolioValue.totalILS;
+  const totalPortfolioUSD = portfolioValue.totalUSD;
+  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined);
 
   if (loading) {
     return (
@@ -336,17 +392,23 @@ export default function IBKR() {
   // Transaction functions
   const handleAddTransaction = async () => {
     if (!transactionFormData.symbol || !transactionFormData.buy_date || 
-        !transactionFormData.quantity || !transactionFormData.buy_price) {
-      alert("אנא מלא את כל השדות הנדרשים");
-      return;
-    }
+        !transactionFormData.quantity || !transactionFormData.buy_price) return;
 
     const quantity = parseFloat(transactionFormData.quantity);
     const buy_price = parseFloat(transactionFormData.buy_price);
-    const buy_fee = calculateBuyFee('ibkr', platformSettings);
+    const buy_fee = calculateBuyFee('ibkr', platformSettings || undefined);
 
     if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0) {
       alert("אנא הזן ערכים תקינים");
+      return;
+    }
+
+    // בדיקת יתרה זמינה
+    const totalTransactionCost = (quantity * buy_price) + buy_fee;
+    const availableUSD = calculateCurrentCash(deposits, conversions, transactions, platformSettings || undefined).USD;
+    
+    if (totalTransactionCost > availableUSD) {
+      alert(`אין מספיק מזומן זמין. נדרש: ${formatCurrency(totalTransactionCost, 'USD')}, זמין: ${formatCurrency(availableUSD, 'USD')}`);
       return;
     }
 
@@ -361,7 +423,24 @@ export default function IBKR() {
     });
 
     if (newTransaction) {
-      setTransactions(prev => [...prev, newTransaction]);
+      // עדכון מיידי של הטבלה
+      setTransactions(await getTransactions('ibkr'));
+      
+      // טעינת לוגו עבור העסקה החדשה
+      try {
+        const response = await fetch(`/api/stock-info?symbol=${newTransaction.symbol}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.logo_url) {
+            setTransactions(prev => prev.map(t => 
+              t.id === newTransaction.id ? { ...t, logo_url: data.logo_url } : t
+            ));
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to load logo for ${newTransaction.symbol}:`, error);
+      }
+      
       setTransactionFormData({
         symbol: "",
         buy_date: new Date().toISOString().split('T')[0],
@@ -391,7 +470,7 @@ export default function IBKR() {
 
     const quantity = parseFloat(transactionFormData.quantity);
     const buy_price = parseFloat(transactionFormData.buy_price);
-    const buy_fee = calculateBuyFee('ibkr', platformSettings);
+    const buy_fee = calculateBuyFee('ibkr', platformSettings || undefined);
 
     if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0) {
       alert("אנא הזן ערכים תקינים");
@@ -425,9 +504,14 @@ export default function IBKR() {
   };
 
   const handleDeleteTransaction = async (id: string) => {
-    if (window.confirm('האם אתה בטוח שברצונך למחוק את העסקה זו?')) {
-      await deleteTransaction(id);
-      setTransactions(transactions.filter(t => t.id !== id));
+    setDeletingTransaction(id);
+  };
+
+  const confirmDeleteTransaction = async () => {
+    if (deletingTransaction) {
+      await deleteTransaction(deletingTransaction);
+      setTransactions(transactions.filter(t => t.id !== deletingTransaction));
+      setDeletingTransaction(null);
     }
   };
 
@@ -449,7 +533,7 @@ export default function IBKR() {
 
     const sell_quantity = parseFloat(sellFormData.sell_quantity);
     const sell_price_per_unit = parseFloat(sellFormData.sell_price_per_unit);
-    const sell_fee = calculateSellFee('ibkr', platformSettings);
+    const sell_fee = calculateSellFee('ibkr', platformSettings || undefined);
 
     if (isNaN(sell_quantity) || sell_quantity <= 0 || isNaN(sell_price_per_unit) || sell_price_per_unit <= 0) {
       alert("אנא הזן ערכים תקינים");
@@ -458,6 +542,14 @@ export default function IBKR() {
 
     if (sell_quantity > sellingTransaction.quantity) {
       alert(`לא ניתן למכור יותר מ-${sellingTransaction.quantity} יחידות`);
+      return;
+    }
+
+    // בדיקת יתרה זמינה לעמלת מכירה
+    const availableUSD = calculateCurrentCash(deposits, conversions, transactions, platformSettings || undefined).USD;
+    
+    if (sell_fee > availableUSD) {
+      alert(`אין מספיק מזומן זמין לעמלת מכירה. נדרש: ${formatCurrency(sell_fee, 'USD')}, זמין: ${formatCurrency(availableUSD, 'USD')}`);
       return;
     }
 
@@ -477,8 +569,7 @@ export default function IBKR() {
       setSellFormData({
         sell_date: new Date().toISOString().split('T')[0],
         sell_quantity: "",
-        sell_price_per_unit: "",
-        sell_fee: ""
+        sell_price_per_unit: ""
       });
       setShowSellForm(false);
     } else {
@@ -509,18 +600,28 @@ export default function IBKR() {
 
   return (
     <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold text-right mb-8">
-        {platformSettings?.display_name || 'IBKR'}
-      </h1>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold text-right">
+          {platformSettings?.display_name || 'IBKR'}
+        </h1>
+        <Button 
+          onClick={refreshStockPrices}
+          disabled={refreshingPrices || transactions.length === 0}
+          className="bg-blue-600 hover:bg-blue-700"
+          title={transactions.length === 0 ? "אין עסקאות לרענון" : "רענן מחירי מניות"}
+        >
+          {refreshingPrices ? 'מעדכן...' : 'רענן מחירים'}
+        </Button>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <MetricCard
           title="שווי תיק כולל"
-          value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
+          value={`₪ ${Math.round(totalPortfolioILS)} | $ ${Math.round(totalPortfolioUSD)}`}
         />
         <MetricCard
           title="רווח/הפסד (באחוזים ובמטבע) על כל התקופה"
-          value="—% / —"
-          valueClassName="text-red-600"
+          value={`${profitLoss.percentage.toFixed(2)}% / ${formatCurrency(profitLoss.amount, 'USD')}`}
+          valueClassName={profitLoss.amount >= 0 ? "text-green-600" : "text-red-600"}
         />
         <MetricCard
           title="מזומן בשקל ומזומן בדולר"
@@ -963,105 +1064,204 @@ export default function IBKR() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-gray-50">
-                    <th className="text-right p-3 font-medium">סימול</th>
-                    <th className="text-right p-3 font-medium">תאריך קנייה</th>
-                    <th className="text-right p-3 font-medium">כמות</th>
-                    <th className="text-right p-3 font-medium">מחיר קנייה</th>
-                    <th className="text-right p-3 font-medium">עמלת קנייה</th>
-                    <th className="text-right p-3 font-medium">סכום השקעה</th>
-                    <th className="text-right p-3 font-medium">סטטוס</th>
-                    <th className="text-right p-3 font-medium">תאריך מכירה</th>
-                    <th className="text-right p-3 font-medium">כמות נמכרה</th>
-                    <th className="text-right p-3 font-medium">מחיר ליחידה</th>
-                    <th className="text-right p-3 font-medium">רווח/הפסד</th>
-                    <th className="text-right p-3 font-medium">פעולות</th>
+                    <th className="text-center p-3 font-medium">סימול</th>
+                    <th className="text-center p-3 font-medium">תאריכים</th>
+                    <th className="text-center p-3 font-medium">כמות</th>
+                    <th className="text-center p-3 font-medium">מחירים</th>
+                    <th className="text-center p-3 font-medium">עמלות</th>
+                    <th className="text-center p-3 font-medium">סכום השקעה</th>
+                    <th className="text-center p-3 font-medium">רווח/הפסד</th>
+                    <th className="text-center p-3 font-medium">סכום סופי</th>
+                    <th className="text-center p-3 font-medium">סטטוס</th>
+                    <th className="text-center p-3 font-medium">פעולות</th>
                   </tr>
                 </thead>
                 <tbody>
                   {transactions.map((transaction) => {
-                    const investmentAmount = calculateInvestmentAmount(transaction.quantity, transaction.buy_price, transaction.buy_fee);
-                    const profitLoss = transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit && transaction.sell_fee !== undefined
-                      ? calculateProfitLoss(transaction.quantity, transaction.buy_price, transaction.buy_fee, transaction.sell_quantity, transaction.sell_price_per_unit, transaction.sell_fee)
+                    const buyFee = calculateBuyFee('ibkr', platformSettings || undefined);
+                    const sellFee = calculateSellFee('ibkr', platformSettings || undefined);
+                    const investmentAmount = calculateInvestmentAmount(transaction.quantity, transaction.buy_price, buyFee + (transaction.status === 'closed' ? sellFee : 0));
+                    const profitLoss = transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit
+                      ? calculateProfitLoss(transaction.quantity, transaction.buy_price, buyFee, transaction.sell_quantity, transaction.sell_price_per_unit, sellFee)
                       : null;
 
                     return (
-                      <tr key={transaction.id} className="border-b hover:bg-gray-50">
-                        <td className="text-right p-3 font-medium">
-                          <div className="flex items-center justify-end gap-2">
-                            {transaction.logo_url && (
-                              <img 
-                                src={transaction.logo_url} 
-                                alt={`${transaction.symbol} logo`}
-                                className="w-6 h-6 rounded"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = 'none';
-                                }}
-                              />
-                            )}
-                            <span>{transaction.symbol}</span>
+                      <tr key={transaction.id} className="border-b hover:bg-gray-50 h-16">
+                        {/* סימול */}
+                        <td className="text-center p-3 font-medium">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            <div className="flex items-center gap-2">
+                              {transaction.logo_url && (
+                                <img 
+                                  src={transaction.logo_url} 
+                                  alt={`${transaction.symbol} logo`}
+                                  className="w-6 h-6 rounded"
+                                  onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              <span className="font-semibold">{transaction.symbol}</span>
+                            </div>
                           </div>
                         </td>
-                        <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(transaction.buy_date)}</td>
-                        <td className="text-right p-3">{transaction.quantity.toLocaleString()}</td>
-                        <td className="text-right p-3">{formatCurrency(transaction.buy_price, transaction.buy_fee_currency)}</td>
-                        <td className="text-right p-3">{formatCurrency(transaction.buy_fee, transaction.buy_fee_currency)}</td>
-                        <td className="text-right p-3 font-medium">{formatCurrency(investmentAmount, transaction.buy_fee_currency)}</td>
-                        <td className="text-right p-3">
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            transaction.status === 'open' 
-                              ? 'bg-blue-100 text-blue-800' 
-                              : 'bg-green-100 text-green-800'
-                          }`}>
-                            {transaction.status === 'open' ? 'פתוח' : 'נמכר'}
-                          </span>
+                        
+                        {/* תאריכים */}
+                        <td className="text-center p-3 min-w-[120px]">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            <div className="text-sm leading-tight text-center">
+                              <div className="font-medium">קנייה: {formatDate(transaction.buy_date)}</div>
+                              {transaction.sell_date && (
+                                <div className="font-medium">מכירה: {formatDate(transaction.sell_date)}</div>
+                              )}
+                            </div>
+                          </div>
                         </td>
-                        <td className="text-right p-3">
-                          {transaction.sell_date ? formatDate(transaction.sell_date) : '—'}
+                        
+                        {/* כמות */}
+                        <td className="text-center p-3">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            {transaction.quantity.toLocaleString()}
+                          </div>
                         </td>
-                        <td className="text-right p-3">
-                          {transaction.sell_quantity ? transaction.sell_quantity.toLocaleString() : '—'}
+                        
+                        {/* מחירים */}
+                        <td className="text-center p-3">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            <div className="text-sm leading-tight text-center">
+                              <div className="font-medium">קנייה: {formatCurrency(transaction.buy_price, 'USD')}</div>
+                              {transaction.status === 'closed' && transaction.sell_price_per_unit && (
+                                <div className="font-medium">מכירה: {formatCurrency(transaction.sell_price_per_unit, 'USD')}</div>
+                              )}
+                            </div>
+                          </div>
                         </td>
-                        <td className="text-right p-3">
-                          {transaction.sell_price_per_unit 
-                            ? formatCurrency(transaction.sell_price_per_unit, transaction.sell_fee_currency || 'USD')
-                            : '—'
-                          }
+                        
+                        {/* עמלות */}
+                        <td className="text-center p-3">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            <div className="text-sm font-medium">
+                              {formatCurrency(buyFee + (transaction.status === 'closed' ? sellFee : 0), 'USD')}
+                            </div>
+                          </div>
                         </td>
-                        <td className="text-right p-3">
-                          {profitLoss ? (
-                            <span className={`font-medium ${profitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {profitLoss.percentage.toFixed(2)}% / {formatCurrency(profitLoss.amount, transaction.sell_fee_currency || 'USD')}
+                        
+                        {/* סכום השקעה */}
+                        <td className="text-center p-3 font-medium">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            {formatCurrency(investmentAmount, 'USD')}
+                          </div>
+                        </td>
+                        
+                        {/* רווח/הפסד */}
+                        <td className="text-center p-3">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            {transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit ? (
+                              // עסקה נמכרה - חישוב רווח/הפסד
+                              <div className="text-center">
+                                {(() => {
+                                  const transactionProfitLoss = calculateProfitLoss(
+                                    transaction.quantity,
+                                    transaction.buy_price,
+                                    buyFee,
+                                    transaction.sell_quantity!,
+                                    transaction.sell_price_per_unit!,
+                                    sellFee
+                                  );
+                                  return (
+                                    <>
+                                      <div className={`font-medium text-sm ${transactionProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {transactionProfitLoss.percentage.toFixed(2)}%
+                                      </div>
+                                      <div className={`text-xs ${transactionProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                        {formatCurrency(transactionProfitLoss.amount, 'USD')}
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            ) : transaction.status === 'open' && stockPrices[transaction.symbol] ? (
+                              // עסקה פתוחה - רווח/הפסד נוכחי
+                              <div className="text-center">
+                                <div className={`font-medium text-sm ${(transaction.quantity * stockPrices[transaction.symbol]) >= investmentAmount ? 'text-green-600' : 'text-red-600'}`}>
+                                  {(((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount) / investmentAmount * 100).toFixed(2)}%
+                                </div>
+                                <div className={`text-xs ${(transaction.quantity * stockPrices[transaction.symbol]) >= investmentAmount ? 'text-green-600' : 'text-red-600'}`}>
+                                  {formatCurrency((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount, 'USD')}
+                                </div>
+                              </div>
+                            ) : (
+                              <span>—</span>
+                            )}
+                          </div>
+                        </td>
+                        
+                        {/* סכום סופי */}
+                        <td className="text-center p-3 font-medium">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            {transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit ? (
+                              // עסקה נמכרה - מחיר מכירה * כמות - עמלות
+                              <span className={`${profitLoss && profitLoss.amount >= 0 ? 'text-green-600' : profitLoss && profitLoss.amount < 0 ? 'text-red-600' : ''}`}>
+                                {formatCurrency((transaction.sell_quantity * transaction.sell_price_per_unit) - buyFee - sellFee, 'USD')}
+                              </span>
+                            ) : transaction.status === 'open' && stockPrices[transaction.symbol] ? (
+                              // עסקה פתוחה - מחיר נוכחי * כמות - עמלת קנייה (צבע שחור)
+                              <span>
+                                {(() => {
+                                  console.log(`Stock price for ${transaction.symbol}:`, stockPrices[transaction.symbol]);
+                                  return formatCurrency((transaction.quantity * stockPrices[transaction.symbol]) - buyFee, 'USD');
+                                })()}
+                              </span>
+                            ) : (
+                              <span>—</span>
+                            )}
+                          </div>
+                        </td>
+                        
+                        {/* סטטוס */}
+                        <td className="text-center p-3">
+                          <div className="flex flex-col justify-center h-full items-center">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              transaction.status === 'open' 
+                                ? 'bg-blue-100 text-blue-800' 
+                                : 'bg-green-100 text-green-800'
+                            }`}>
+                              {transaction.status === 'open' ? 'פתוח' : 'נמכר'}
                             </span>
-                          ) : '—'}
+                          </div>
                         </td>
-                        <td className="text-right p-3">
-                          <div className="flex gap-1">
-                            {transaction.status === 'open' && (
-                              <>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => editTransaction(transaction)}
-                                >
-                                  <Edit className="w-4 h-4" />
-                                </Button>
+                        
+                        {/* פעולות */}
+                        <td className="text-center p-3">
+                          <div className="flex flex-col justify-center h-full items-center space-y-1">
+                            <div className="flex gap-1 justify-center">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => editTransaction(transaction)}
+                                className="text-xs px-2 py-1"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              {transaction.status === 'open' && (
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   onClick={() => startSellTransaction(transaction)}
-                                  className="bg-green-50 hover:bg-green-100"
+                                  className="text-xs px-2 py-1 bg-green-50 hover:bg-green-100"
                                 >
                                   מכור
                                 </Button>
-                              </>
-                            )}
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleDeleteTransaction(transaction.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                              )}
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDeleteTransaction(transaction.id)}
+                                className="text-xs px-2 py-1"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1069,7 +1269,7 @@ export default function IBKR() {
                   })}
                   {transactions.length === 0 && (
                     <tr>
-                      <td colSpan={12} className="text-center p-8 text-gray-500">
+                      <td colSpan={10} className="text-center p-8 text-gray-500">
                         אין עסקאות להצגה
                       </td>
                     </tr>
@@ -1080,6 +1280,26 @@ export default function IBKR() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingTransaction} onOpenChange={() => setDeletingTransaction(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>מחיקת עסקה</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p>האם אתה בטוח שברצונך למחוק את העסקה זו?</p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeletingTransaction(null)}>
+              ביטול
+            </Button>
+            <Button variant="destructive" onClick={confirmDeleteTransaction}>
+              מחק
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

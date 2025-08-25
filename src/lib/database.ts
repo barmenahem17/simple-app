@@ -291,27 +291,134 @@ export const sellTransaction = async (
 
 // Helper function to calculate actual cash balance
 export const calculateActualCash = (deposits: Deposit[], conversions: Conversion[]) => {
-  const totals = { ILS: 0, USD: 0 }
-  
+  return calculateCurrentCash(deposits, conversions, [])
+}
+
+// Calculate current cash balance considering deposits, conversions, and transactions
+export const calculateCurrentCash = (
+  deposits: Deposit[], 
+  conversions: Conversion[], 
+  transactions: Transaction[],
+  platformSettings?: PlatformSettings
+): { ILS: number, USD: number } => {
+  let totalILS = 0
+  let totalUSD = 0
+
   // Add deposits
   deposits.forEach(deposit => {
-    totals[deposit.currency] += deposit.amount
+    if (deposit.currency === 'ILS') {
+      totalILS += deposit.amount
+    } else {
+      totalUSD += deposit.amount
+    }
   })
-  
-  // Account for conversions
+
+  // Apply conversions
   conversions.forEach(conversion => {
-    totals[conversion.source_currency] -= conversion.source_amount
-    // Exchange rate logic: if converting ILS to USD, divide by rate (e.g., 100 ILS / 3.5 = 28.57 USD)
-    // If converting USD to ILS, multiply by rate (e.g., 100 USD * 3.5 = 350 ILS)
-    const targetAmount = conversion.source_currency === 'ILS' && conversion.target_currency === 'USD'
-      ? conversion.source_amount / conversion.exchange_rate
-      : conversion.source_currency === 'USD' && conversion.target_currency === 'ILS'
-      ? conversion.source_amount * conversion.exchange_rate
-      : conversion.source_amount * conversion.exchange_rate // fallback
-    totals[conversion.target_currency] += targetAmount
+    if (conversion.source_currency === 'ILS' && conversion.target_currency === 'USD') {
+      // Convert ILS to USD
+      const convertedAmount = conversion.source_amount / conversion.exchange_rate
+      totalILS -= conversion.source_amount
+      totalUSD += convertedAmount
+    } else if (conversion.source_currency === 'USD' && conversion.target_currency === 'ILS') {
+      // Convert USD to ILS
+      const convertedAmount = conversion.source_amount * conversion.exchange_rate
+      totalUSD -= conversion.source_amount
+      totalILS += convertedAmount
+    }
   })
+
+  // Handle transactions - deduct buy costs and add sell proceeds
+  transactions.forEach(transaction => {
+    const buyFee = platformSettings ? calculateBuyFee('extrade', platformSettings) : transaction.buy_fee
+    const sellFee = platformSettings ? calculateSellFee('extrade', platformSettings) : (transaction.sell_fee || 0)
+    
+    // Deduct buy costs (always in USD)
+    totalUSD -= (transaction.quantity * transaction.buy_price) + buyFee
+    
+    // Add sell proceeds for closed transactions (always in USD)
+    if (transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit) {
+      totalUSD += (transaction.sell_quantity * transaction.sell_price_per_unit) - sellFee
+    }
+  })
+
+  return { ILS: totalILS, USD: totalUSD }
+}
+
+// Calculate total portfolio value (cash + investments)
+export const calculateTotalPortfolioValue = (
+  deposits: Deposit[], 
+  conversions: Conversion[], 
+  transactions: Transaction[],
+  platformSettings?: PlatformSettings,
+  exchangeRate: number = 3.5 // Default ILS to USD rate
+): { totalILS: number, totalUSD: number, investmentsUSD: number } => {
+  const cash = calculateCurrentCash(deposits, conversions, transactions, platformSettings)
   
-  return totals
+  // Calculate value of open transactions (investments)
+  const investmentsUSD = transactions
+    .filter(t => t.status === 'open')
+    .reduce((total, transaction) => {
+      // For open transactions, use buy price as current value
+      return total + (transaction.quantity * transaction.buy_price)
+    }, 0)
+  
+  return {
+    totalILS: cash.ILS,
+    totalUSD: cash.USD + investmentsUSD,
+    investmentsUSD
+  }
+}
+
+// Calculate overall profit/loss based on transactions only (not conversions)
+export const calculateOverallProfitLoss = (
+  deposits: Deposit[], 
+  conversions: Conversion[], 
+  transactions: Transaction[],
+  platformSettings?: PlatformSettings,
+  exchangeRate: number = 3.5
+): { amount: number, percentage: number } => {
+  // Calculate total money invested in transactions (buy costs)
+  const totalInvestedInTransactions = transactions.reduce((total, transaction) => {
+    const buyFee = platformSettings ? calculateBuyFee('extrade', platformSettings) : transaction.buy_fee
+    const totalBuyCost = (transaction.quantity * transaction.buy_price) + buyFee
+    return total + totalBuyCost
+  }, 0)
+  
+  // Calculate total money received from sold transactions
+  const totalReceivedFromSales = transactions
+    .filter(t => t.status === 'closed' && t.sell_quantity && t.sell_price_per_unit)
+    .reduce((total, transaction) => {
+      const sellFee = platformSettings ? calculateSellFee('extrade', platformSettings) : (transaction.sell_fee || 0)
+      const sellProceeds = (transaction.sell_quantity! * transaction.sell_price_per_unit!) - sellFee
+      return total + sellProceeds
+    }, 0)
+  
+  // Calculate current value of open positions (unsold transactions)
+  const currentValueOfOpenPositions = transactions
+    .filter(t => t.status === 'open')
+    .reduce((total, transaction) => {
+      // For open positions, we use the buy price as current value
+      return total + (transaction.quantity * transaction.buy_price)
+    }, 0)
+  
+  // Total current value = money from sales + current value of open positions
+  const totalCurrentValue = totalReceivedFromSales + currentValueOfOpenPositions
+  
+  // Calculate profit/loss amount
+  const profitLossAmount = totalCurrentValue - totalInvestedInTransactions
+  
+  // Calculate total portfolio value for percentage calculation
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings, exchangeRate)
+  const totalPortfolioValue = portfolioValue.totalUSD + (portfolioValue.totalILS / exchangeRate)
+  
+  // Calculate profit/loss percentage relative to total portfolio value
+  const profitLossPercentage = totalPortfolioValue > 0 ? (profitLossAmount / totalPortfolioValue) * 100 : 0
+  
+  return {
+    amount: profitLossAmount,
+    percentage: profitLossPercentage
+  }
 }
 
 // Helper functions for transaction calculations

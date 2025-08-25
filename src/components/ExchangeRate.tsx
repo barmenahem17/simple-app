@@ -6,15 +6,16 @@ import { RefreshCw } from "lucide-react";
 
 interface ExchangeRateProps {
   className?: string;
+  onRefresh?: () => void;
 }
 
-export function ExchangeRate({ className = "" }: ExchangeRateProps) {
+export function ExchangeRate({ className = "", onRefresh }: ExchangeRateProps) {
   const [rate, setRate] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
   const [error, setError] = useState<string>("");
 
-  const fetchExchangeRate = async () => {
+  const handleRefresh = async () => {
     setLoading(true);
     setError("");
     
@@ -32,6 +33,11 @@ export function ExchangeRate({ className = "" }: ExchangeRateProps) {
       } else {
         throw new Error(data.error || 'Failed to fetch rate');
       }
+      
+      // Call the onRefresh callback to refresh stock prices
+      if (onRefresh) {
+        onRefresh();
+      }
     } catch (error) {
       console.error('Error fetching exchange rate:', error);
       setError('שגיאה בטעינת שער');
@@ -47,7 +53,7 @@ export function ExchangeRate({ className = "" }: ExchangeRateProps) {
   };
 
   useEffect(() => {
-    fetchExchangeRate();
+    handleRefresh();
   }, []);
 
   return (
@@ -68,7 +74,7 @@ export function ExchangeRate({ className = "" }: ExchangeRateProps) {
       <Button
         variant="ghost"
         size="sm"
-        onClick={fetchExchangeRate}
+        onClick={handleRefresh}
         disabled={loading}
         className="h-7 w-7 p-0 hover:bg-blue-50 rounded-full"
         title="רענן שער חליפין"

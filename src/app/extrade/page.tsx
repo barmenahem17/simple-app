@@ -19,7 +19,9 @@ import {
   updateTransaction,
   deleteTransaction,
   sellTransaction,
-  calculateActualCash,
+  calculateCurrentCash,
+  calculateTotalPortfolioValue,
+  calculateOverallProfitLoss,
   calculateInvestmentAmount,
   calculateProfitLoss,
   formatCurrency,
@@ -38,6 +40,8 @@ export default function Extrade() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [platformSettings, setPlatformSettings] = useState<PlatformSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [stockPrices, setStockPrices] = useState<{[symbol: string]: number}>({});
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
 
   // Load data from Supabase
   useEffect(() => {
@@ -199,9 +203,52 @@ export default function Extrade() {
   };
 
   // פונקציה לחישוב מזומן אמיתי עם התחשבות בהמרות
-  const actualCash = calculateActualCash(deposits, conversions);
+  const actualCash = calculateCurrentCash(deposits, conversions, transactions, platformSettings || undefined);
   const totalILS = actualCash.ILS;
   const totalUSD = actualCash.USD;
+
+  // חישוב שווי תיק כולל
+  const portfolioValue = calculateTotalPortfolioValue(deposits, conversions, transactions, platformSettings || undefined);
+  const totalPortfolioILS = portfolioValue.totalILS;
+  const totalPortfolioUSD = portfolioValue.totalUSD;
+
+  // חישוב רווח/הפסד כולל
+  const profitLoss = calculateOverallProfitLoss(deposits, conversions, transactions, platformSettings || undefined);
+
+  // פונקציה לרענון מחירים מה-API
+  const refreshStockPrices = async () => {
+    if (transactions.length === 0) {
+      alert("אין עסקאות לרענון מחירים");
+      return;
+    }
+    
+    console.log('Refreshing stock prices...');
+    setRefreshingPrices(true);
+    const symbols = [...new Set(transactions.map(t => t.symbol))];
+    console.log('Symbols to fetch:', symbols);
+    const pricesData: {[symbol: string]: number} = {};
+    
+    for (const symbol of symbols) {
+      try {
+        console.log(`Fetching price for ${symbol}...`);
+        const response = await fetch(`/api/stock-price?symbol=${symbol}`);
+        console.log(`Response status for ${symbol}:`, response.status);
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`Price data for ${symbol}:`, data);
+          pricesData[symbol] = data.price;
+        } else {
+          console.error(`Failed to fetch price for ${symbol}:`, response.status);
+        }
+      } catch (error) {
+        console.error(`Error loading price for ${symbol}:`, error);
+      }
+    }
+    
+    console.log('Final prices data:', pricesData);
+    setStockPrices(pricesData);
+    setRefreshingPrices(false);
+  };
 
   const handleAddConversion = async () => {
     if (!conversionFormData.date || !conversionFormData.sourceAmount || !conversionFormData.exchangeRate) {
@@ -218,7 +265,7 @@ export default function Extrade() {
     }
 
     // בדיקת יתרה זמינה
-    const currentCash = calculateActualCash(deposits, conversions);
+    const currentCash = calculateCurrentCash(deposits, conversions, transactions, platformSettings || undefined);
     const availableBalance = currentCash[conversionFormData.sourceCurrency];
     
     if (sourceAmount > availableBalance) {
@@ -337,7 +384,7 @@ export default function Extrade() {
 
     const quantity = parseFloat(transactionFormData.quantity);
     const buy_price = parseFloat(transactionFormData.buy_price);
-    const buy_fee = calculateBuyFee('extrade', platformSettings);
+    const buy_fee = calculateBuyFee('extrade', platformSettings || undefined);
 
     if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0) {
       alert("אנא הזן ערכים תקינים");
@@ -385,7 +432,7 @@ export default function Extrade() {
 
     const quantity = parseFloat(transactionFormData.quantity);
     const buy_price = parseFloat(transactionFormData.buy_price);
-    const buy_fee = calculateBuyFee('extrade', platformSettings);
+    const buy_fee = calculateBuyFee('extrade', platformSettings || undefined);
 
     if (isNaN(quantity) || quantity <= 0 || isNaN(buy_price) || buy_price <= 0) {
       alert("אנא הזן ערכים תקינים");
@@ -443,7 +490,7 @@ export default function Extrade() {
 
     const sell_quantity = parseFloat(sellFormData.sell_quantity);
     const sell_price_per_unit = parseFloat(sellFormData.sell_price_per_unit);
-    const sell_fee = calculateSellFee('extrade', platformSettings);
+    const sell_fee = calculateSellFee('extrade', platformSettings || undefined);
 
     if (isNaN(sell_quantity) || sell_quantity <= 0 || isNaN(sell_price_per_unit) || sell_price_per_unit <= 0) {
       alert("אנא הזן ערכים תקינים");
@@ -511,18 +558,28 @@ export default function Extrade() {
         </div>
       ) : (
         <>
-          <h1 className="text-3xl font-bold text-right mb-8">
-            {platformSettings?.display_name || 'Extrade'}
-          </h1>
+          <div className="flex justify-between items-center mb-8">
+            <h1 className="text-3xl font-bold text-right">
+              {platformSettings?.display_name || 'Extrade'}
+            </h1>
+            <Button 
+              onClick={refreshStockPrices}
+              disabled={refreshingPrices || transactions.length === 0}
+              className="bg-blue-600 hover:bg-blue-700"
+              title={transactions.length === 0 ? "אין עסקאות לרענון" : "רענן מחירי מניות"}
+            >
+              {refreshingPrices ? 'מעדכן...' : 'רענן מחירים'}
+            </Button>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
             <MetricCard
               title="שווי תיק כולל"
-              value={`₪ ${Math.round(totalILS)} | $ ${Math.round(totalUSD)}`}
+              value={`₪ ${Math.round(totalPortfolioILS)} | $ ${Math.round(totalPortfolioUSD)}`}
             />
             <MetricCard
               title="רווח/הפסד (באחוזים ובמטבע) על כל התקופה"
-              value="—% / —"
-              valueClassName="text-green-600"
+              value={`${profitLoss.percentage.toFixed(2)}% / ${formatCurrency(profitLoss.amount, 'USD')}`}
+              valueClassName={profitLoss.amount >= 0 ? "text-green-600" : "text-red-600"}
             />
             <MetricCard
               title="מזומן בשקל ומזומן בדולר"
@@ -754,42 +811,53 @@ export default function Extrade() {
                       <tr className="border-b bg-gray-50">
                         <th className="text-right p-3 font-medium">תאריך</th>
                         <th className="text-right p-3 font-medium">סכום מקור</th>
-                        <th className="text-right p-3 font-medium">מטבע מקור</th>
                         <th className="text-right p-3 font-medium">שער המרה</th>
-                        <th className="text-right p-3 font-medium">מטבע יעד</th>
+                        <th className="text-right p-3 font-medium">סכום שהתקבל</th>
                         <th className="text-right p-3 font-medium">פעולות</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {conversions.map((conversion) => (
-                        <tr key={conversion.id} className="border-b hover:bg-gray-50">
-                          <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(conversion.date)}</td>
-                          <td className="text-right p-3 font-medium">{conversion.source_amount.toLocaleString()}</td>
-                          <td className="text-right p-3">{conversion.source_currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
-                          <td className="text-right p-3">{conversion.exchange_rate}</td>
-                          <td className="text-right p-3">{conversion.target_currency === "ILS" ? "₪ שקל" : "$ דולר"}</td>
-                          <td className="text-right p-3">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => editConversion(conversion)}
-                              className="ml-2"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleDeleteConversion(conversion.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
+                      {conversions.map((conversion) => {
+                        // חישוב נכון: אם ממירים מ-ILS ל-USD נחלק, אם מ-USD ל-ILS נכפיל
+                        const targetAmount = conversion.source_currency === "ILS" && conversion.target_currency === "USD"
+                          ? conversion.source_amount / conversion.exchange_rate
+                          : conversion.source_amount * conversion.exchange_rate;
+                        const sourceCurrencySymbol = conversion.source_currency === "ILS" ? "₪" : "$";
+                        const targetCurrencySymbol = conversion.target_currency === "ILS" ? "₪" : "$";
+                        
+                        return (
+                          <tr key={conversion.id} className="border-b hover:bg-gray-50">
+                            <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(conversion.date)}</td>
+                            <td className="text-right p-3 font-medium">
+                              {conversion.source_amount.toLocaleString()} {sourceCurrencySymbol}
+                            </td>
+                            <td className="text-right p-3">{conversion.exchange_rate}</td>
+                            <td className="text-right p-3 font-medium">
+                              {targetAmount.toLocaleString()} {targetCurrencySymbol}
+                            </td>
+                            <td className="text-right p-3">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => editConversion(conversion)}
+                                className="ml-2"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDeleteConversion(conversion.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {conversions.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="text-center p-8 text-gray-500">
+                          <td colSpan={5} className="text-center p-8 text-gray-500">
                             אין המרות להצגה
                           </td>
                         </tr>
@@ -965,105 +1033,204 @@ export default function Extrade() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b bg-gray-50">
-                        <th className="text-right p-3 font-medium">סימול</th>
-                        <th className="text-right p-3 font-medium">תאריך קנייה</th>
-                        <th className="text-right p-3 font-medium">כמות</th>
-                        <th className="text-right p-3 font-medium">מחיר קנייה</th>
-                        <th className="text-right p-3 font-medium">עמלת קנייה</th>
-                        <th className="text-right p-3 font-medium">סכום השקעה</th>
-                        <th className="text-right p-3 font-medium">סטטוס</th>
-                        <th className="text-right p-3 font-medium">תאריך מכירה</th>
-                        <th className="text-right p-3 font-medium">כמות נמכרה</th>
-                        <th className="text-right p-3 font-medium">מחיר ליחידה</th>
-                        <th className="text-right p-3 font-medium">רווח/הפסד</th>
-                        <th className="text-right p-3 font-medium">פעולות</th>
+                        <th className="text-center p-3 font-medium">סימול</th>
+                        <th className="text-center p-3 font-medium">תאריכים</th>
+                        <th className="text-center p-3 font-medium">כמות</th>
+                        <th className="text-center p-3 font-medium">מחירים</th>
+                        <th className="text-center p-3 font-medium">עמלות</th>
+                        <th className="text-center p-3 font-medium">סכום השקעה</th>
+                        <th className="text-center p-3 font-medium">רווח/הפסד</th>
+                        <th className="text-center p-3 font-medium">סכום סופי</th>
+                        <th className="text-center p-3 font-medium">סטטוס</th>
+                        <th className="text-center p-3 font-medium">פעולות</th>
                       </tr>
                     </thead>
                     <tbody>
                       {transactions.map((transaction) => {
-                        const investmentAmount = calculateInvestmentAmount(transaction.quantity, transaction.buy_price, transaction.buy_fee);
-                        const profitLoss = transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit && transaction.sell_fee !== undefined
-                          ? calculateProfitLoss(transaction.quantity, transaction.buy_price, transaction.buy_fee, transaction.sell_quantity, transaction.sell_price_per_unit, transaction.sell_fee)
+                        const buyFee = calculateBuyFee('extrade', platformSettings || undefined);
+                        const sellFee = calculateSellFee('extrade', platformSettings || undefined);
+                        const investmentAmount = calculateInvestmentAmount(transaction.quantity, transaction.buy_price, buyFee + (transaction.status === 'closed' ? sellFee : 0));
+                        const profitLoss = transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit
+                          ? calculateProfitLoss(transaction.quantity, transaction.buy_price, buyFee, transaction.sell_quantity, transaction.sell_price_per_unit, sellFee)
                           : null;
 
                         return (
-                                                <tr key={transaction.id} className="border-b hover:bg-gray-50">
-                        <td className="text-right p-3 font-medium">
-                          <div className="flex items-center justify-end gap-2">
-                            {transaction.logo_url && (
-                              <img 
-                                src={transaction.logo_url} 
-                                alt={`${transaction.symbol} logo`}
-                                className="w-6 h-6 rounded"
-                                onError={(e) => {
-                                  e.currentTarget.style.display = 'none';
-                                }}
-                              />
-                            )}
-                            <span>{transaction.symbol}</span>
-                          </div>
-                        </td>
-                            <td className="text-right p-3 min-w-[100px] whitespace-nowrap">{formatDate(transaction.buy_date)}</td>
-                            <td className="text-right p-3">{transaction.quantity.toLocaleString()}</td>
-                            <td className="text-right p-3">{formatCurrency(transaction.buy_price, transaction.buy_fee_currency)}</td>
-                            <td className="text-right p-3">{formatCurrency(transaction.buy_fee, transaction.buy_fee_currency)}</td>
-                            <td className="text-right p-3 font-medium">{formatCurrency(investmentAmount, transaction.buy_fee_currency)}</td>
-                            <td className="text-right p-3">
-                              <span className={`px-2 py-1 rounded-full text-xs ${
-                                transaction.status === 'open' 
-                                  ? 'bg-blue-100 text-blue-800' 
-                                  : 'bg-green-100 text-green-800'
-                              }`}>
-                                {transaction.status === 'open' ? 'פתוח' : 'נמכר'}
-                              </span>
+                          <tr key={transaction.id} className="border-b hover:bg-gray-50 h-16">
+                            {/* סימול */}
+                            <td className="text-center p-3 font-medium">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                <div className="flex items-center gap-2">
+                                  {transaction.logo_url && (
+                                    <img 
+                                      src={transaction.logo_url} 
+                                      alt={`${transaction.symbol} logo`}
+                                      className="w-6 h-6 rounded"
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                      }}
+                                    />
+                                  )}
+                                  <span className="font-semibold">{transaction.symbol}</span>
+                                </div>
+                              </div>
                             </td>
-                            <td className="text-right p-3">
-                              {transaction.sell_date ? formatDate(transaction.sell_date) : '—'}
+                            
+                            {/* תאריכים */}
+                            <td className="text-center p-3 min-w-[120px]">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                <div className="text-sm leading-tight text-center">
+                                  <div className="font-medium">קנייה: {formatDate(transaction.buy_date)}</div>
+                                  {transaction.sell_date && (
+                                    <div className="font-medium">מכירה: {formatDate(transaction.sell_date)}</div>
+                                  )}
+                                </div>
+                              </div>
                             </td>
-                            <td className="text-right p-3">
-                              {transaction.sell_quantity ? transaction.sell_quantity.toLocaleString() : '—'}
+                            
+                            {/* כמות */}
+                            <td className="text-center p-3">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                {transaction.quantity.toLocaleString()}
+                              </div>
                             </td>
-                            <td className="text-right p-3">
-                              {transaction.sell_price_per_unit 
-                                ? formatCurrency(transaction.sell_price_per_unit, transaction.sell_fee_currency || 'USD')
-                                : '—'
-                              }
+                            
+                            {/* מחירים */}
+                            <td className="text-center p-3">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                <div className="text-sm leading-tight text-center">
+                                  <div className="font-medium">קנייה: {formatCurrency(transaction.buy_price, 'USD')}</div>
+                                  {transaction.status === 'closed' && transaction.sell_price_per_unit && (
+                                    <div className="font-medium">מכירה: {formatCurrency(transaction.sell_price_per_unit, 'USD')}</div>
+                                  )}
+                                </div>
+                              </div>
                             </td>
-                            <td className="text-right p-3">
-                              {profitLoss ? (
-                                <span className={`font-medium ${profitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                  {profitLoss.percentage.toFixed(2)}% / {formatCurrency(profitLoss.amount, transaction.sell_fee_currency || 'USD')}
+                            
+                            {/* עמלות */}
+                            <td className="text-center p-3">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                <div className="text-sm font-medium">
+                                  {formatCurrency(buyFee + (transaction.status === 'closed' ? sellFee : 0), 'USD')}
+                                </div>
+                              </div>
+                            </td>
+                            
+                            {/* סכום השקעה */}
+                            <td className="text-center p-3 font-medium">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                {formatCurrency(investmentAmount, 'USD')}
+                              </div>
+                            </td>
+                            
+                            {/* רווח/הפסד */}
+                            <td className="text-center p-3">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                {transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit ? (
+                                  // עסקה נמכרה - חישוב רווח/הפסד
+                                  <div className="text-center">
+                                    {(() => {
+                                      const transactionProfitLoss = calculateProfitLoss(
+                                        transaction.quantity,
+                                        transaction.buy_price,
+                                        buyFee,
+                                        transaction.sell_quantity!,
+                                        transaction.sell_price_per_unit!,
+                                        sellFee
+                                      );
+                                      return (
+                                        <>
+                                          <div className={`font-medium text-sm ${transactionProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {transactionProfitLoss.percentage.toFixed(2)}%
+                                          </div>
+                                          <div className={`text-xs ${transactionProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                            {formatCurrency(transactionProfitLoss.amount, 'USD')}
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                ) : transaction.status === 'open' && stockPrices[transaction.symbol] ? (
+                                  // עסקה פתוחה - רווח/הפסד נוכחי
+                                  <div className="text-center">
+                                    <div className={`font-medium text-sm ${(transaction.quantity * stockPrices[transaction.symbol]) >= investmentAmount ? 'text-green-600' : 'text-red-600'}`}>
+                                      {(((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount) / investmentAmount * 100).toFixed(2)}%
+                                    </div>
+                                    <div className={`text-xs ${(transaction.quantity * stockPrices[transaction.symbol]) >= investmentAmount ? 'text-green-600' : 'text-red-600'}`}>
+                                      {formatCurrency((transaction.quantity * stockPrices[transaction.symbol]) - investmentAmount, 'USD')}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span>—</span>
+                                )}
+                              </div>
+                            </td>
+                            
+                            {/* סכום סופי */}
+                            <td className="text-center p-3 font-medium">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                {transaction.status === 'closed' && transaction.sell_quantity && transaction.sell_price_per_unit ? (
+                                  // עסקה נמכרה - מחיר מכירה * כמות - עמלות
+                                  <span className={`${profitLoss && profitLoss.amount >= 0 ? 'text-green-600' : profitLoss && profitLoss.amount < 0 ? 'text-red-600' : ''}`}>
+                                    {formatCurrency((transaction.sell_quantity * transaction.sell_price_per_unit) - buyFee - sellFee, 'USD')}
+                                  </span>
+                                ) : transaction.status === 'open' && stockPrices[transaction.symbol] ? (
+                                  // עסקה פתוחה - מחיר נוכחי * כמות - עמלת קנייה (צבע שחור)
+                                  <span>
+                                    {(() => {
+                                      console.log(`Stock price for ${transaction.symbol}:`, stockPrices[transaction.symbol]);
+                                      return formatCurrency((transaction.quantity * stockPrices[transaction.symbol]) - buyFee, 'USD');
+                                    })()}
+                                  </span>
+                                ) : (
+                                  <span>—</span>
+                                )}
+                              </div>
+                            </td>
+                            
+                            {/* סטטוס */}
+                            <td className="text-center p-3">
+                              <div className="flex flex-col justify-center h-full items-center">
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  transaction.status === 'open' 
+                                    ? 'bg-blue-100 text-blue-800' 
+                                    : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {transaction.status === 'open' ? 'פתוח' : 'נמכר'}
                                 </span>
-                              ) : '—'}
+                              </div>
                             </td>
-                            <td className="text-right p-3">
-                              <div className="flex gap-1">
-                                {transaction.status === 'open' && (
-                                  <>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => editTransaction(transaction)}
-                                    >
-                                      <Edit className="w-4 h-4" />
-                                    </Button>
+                            
+                            {/* פעולות */}
+                            <td className="text-center p-3">
+                              <div className="flex flex-col justify-center h-full items-center space-y-1">
+                                <div className="flex gap-1 justify-center">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => editTransaction(transaction)}
+                                    className="text-xs px-2 py-1"
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </Button>
+                                  {transaction.status === 'open' && (
                                     <Button
                                       variant="outline"
                                       size="sm"
                                       onClick={() => startSellTransaction(transaction)}
-                                      className="bg-green-50 hover:bg-green-100"
+                                      className="text-xs px-2 py-1 bg-green-50 hover:bg-green-100"
                                     >
                                       מכור
                                     </Button>
-                                  </>
-                                )}
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  onClick={() => handleDeleteTransaction(transaction.id)}
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                  )}
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDeleteTransaction(transaction.id)}
+                                    className="text-xs px-2 py-1"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
                               </div>
                             </td>
                           </tr>
@@ -1071,7 +1238,7 @@ export default function Extrade() {
                       })}
                       {transactions.length === 0 && (
                         <tr>
-                          <td colSpan={12} className="text-center p-8 text-gray-500">
+                          <td colSpan={10} className="text-center p-8 text-gray-500">
                             אין עסקאות להצגה
                           </td>
                         </tr>
