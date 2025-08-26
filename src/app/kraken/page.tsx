@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Trash2, Edit, Eye } from "lucide-react";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { 
   getDeposits, 
   addDeposit, 
@@ -43,7 +44,7 @@ export default function Kraken() {
   const [loading, setLoading] = useState(true);
   const [stockPrices, setStockPrices] = useState<{[symbol: string]: number}>({});
   const [refreshingPrices, setRefreshingPrices] = useState(false);
-  const [primaryCurrency, setPrimaryCurrency] = useState<'USD' | 'ILS'>('USD');
+  const { primaryCurrency } = useCurrency();
   const [exchangeRate, setExchangeRate] = useState<number>(3.5); // Default rate
 
   // Load data from Supabase
@@ -105,10 +106,6 @@ export default function Kraken() {
     } else {
       return convertToILS(amount, currency);
     }
-  };
-
-  const toggleCurrency = () => {
-    setPrimaryCurrency(prev => prev === 'USD' ? 'ILS' : 'USD');
   };
 
   // Helper function to format currency in primary currency
@@ -800,15 +797,6 @@ export default function Kraken() {
           {platformSettings?.display_name || 'Kraken'}
         </h1>
         <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={toggleCurrency}
-            className="px-3 py-1 hover:bg-blue-50 border-blue-200 text-blue-700 font-medium"
-            title="החלף מטבע ראשי"
-          >
-            {primaryCurrency === 'USD' ? '$' : '₪'}
-          </Button>
           <Button 
             onClick={refreshStockPrices}
             disabled={refreshingPrices || transactions.length === 0}

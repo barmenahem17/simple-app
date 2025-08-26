@@ -4,14 +4,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { RightSideMenu } from "@/components/RightSideMenu";
 import { ExchangeRate } from "@/components/ExchangeRate";
+import { useCurrency } from "@/contexts/CurrencyContext";
 
 export function AppTopBar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [primaryCurrency, setPrimaryCurrency] = useState<'USD' | 'ILS'>('USD');
-
-  const toggleCurrency = () => {
-    setPrimaryCurrency(prev => prev === 'USD' ? 'ILS' : 'USD');
-  };
+  const { primaryCurrency, toggleCurrency } = useCurrency();
 
   return (
     <>

@@ -2,12 +2,12 @@
 
 import { MetricCard } from "@/components/MetricCard";
 import { useEffect, useState } from "react";
+import { useCurrency } from "@/contexts/CurrencyContext";
 import { 
   getDeposits, 
   getConversions, 
   getTransactions,
   calculateCurrentCash,
-
   calculateTotalPortfolioValue,
   calculateOverallProfitLoss,
   getPlatformSettings,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/database";
 
 export default function Home() {
+  const { primaryCurrency } = useCurrency();
   const [krakenDeposits, setKrakenDeposits] = useState<Deposit[]>([]);
   const [ibkrDeposits, setIbkrDeposits] = useState<Deposit[]>([]);
   const [extradeDeposits, setExtradeDeposits] = useState<Deposit[]>([]);
@@ -35,12 +36,59 @@ export default function Home() {
   const [extradeSettings, setExtradeSettings] = useState<PlatformSettings | null>(null);
   
   const [loading, setLoading] = useState(true);
+  const [exchangeRate, setExchangeRate] = useState<number>(3.5);
+
+  // Fetch exchange rate
+  const fetchExchangeRate = async () => {
+    try {
+      const response = await fetch('/api/exchange-rate');
+      const data = await response.json();
+      if (data.rate) {
+        setExchangeRate(data.rate);
+      }
+    } catch (error) {
+      console.error('Error fetching exchange rate:', error);
+    }
+  };
+
+  // Currency conversion helpers
+  const convertToUSD = (amount: number, currency: 'ILS' | 'USD'): number => {
+    if (currency === 'USD') return amount;
+    return amount / exchangeRate;
+  };
+
+  const convertToILS = (amount: number, currency: 'ILS' | 'USD'): number => {
+    if (currency === 'ILS') return amount;
+    return amount * exchangeRate;
+  };
+
+  const convertToPrimaryCurrency = (amount: number, currency: 'ILS' | 'USD'): number => {
+    if (primaryCurrency === 'USD') {
+      return convertToUSD(amount, currency);
+    } else {
+      return convertToILS(amount, currency);
+    }
+  };
+
+  const formatCurrencyInPrimary = (amount: number, originalCurrency: 'ILS' | 'USD' = 'USD'): string => {
+    const convertedAmount = convertToPrimaryCurrency(amount, originalCurrency);
+    const symbol = primaryCurrency === 'USD' ? '$' : '₪';
+    
+    if (!isFinite(convertedAmount) || isNaN(convertedAmount)) {
+      return `${symbol}0.00`;
+    }
+    
+    return `${symbol}${convertedAmount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+  };
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
         console.log('Loading data from Supabase...');
+        
+        // Fetch exchange rate first
+        await fetchExchangeRate();
         
         // Load all data from all platforms
         const [
@@ -118,9 +166,9 @@ export default function Home() {
   }, []);
 
   // Calculate portfolio data for each platform using new functions
-  const krakenPortfolio = calculateTotalPortfolioValue(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, 3.5, undefined);
-  const ibkrPortfolio = calculateTotalPortfolioValue(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, 3.5, undefined);
-  const extradePortfolio = calculateTotalPortfolioValue(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, 3.5, undefined);
+  const krakenPortfolio = calculateTotalPortfolioValue(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, exchangeRate, undefined);
+  const ibkrPortfolio = calculateTotalPortfolioValue(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, exchangeRate, undefined);
+  const extradePortfolio = calculateTotalPortfolioValue(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, exchangeRate, undefined);
 
   // Calculate cash for each platform
   const krakenCash = calculateCurrentCash(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined);
@@ -128,9 +176,9 @@ export default function Home() {
   const extradeCash = calculateCurrentCash(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined);
 
   // Calculate profit/loss for each platform
-  const krakenProfitLoss = calculateOverallProfitLoss(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, 3.5, undefined);
-  const ibkrProfitLoss = calculateOverallProfitLoss(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, 3.5, undefined);
-  const extradeProfitLoss = calculateOverallProfitLoss(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, 3.5, undefined);
+  const krakenProfitLoss = calculateOverallProfitLoss(krakenDeposits, krakenConversions, krakenTransactions, krakenSettings || undefined, exchangeRate, undefined);
+  const ibkrProfitLoss = calculateOverallProfitLoss(ibkrDeposits, ibkrConversions, ibkrTransactions, ibkrSettings || undefined, exchangeRate, undefined);
+  const extradeProfitLoss = calculateOverallProfitLoss(extradeDeposits, extradeConversions, extradeTransactions, extradeSettings || undefined, exchangeRate, undefined);
 
   // Calculate totals
   const totalPortfolioILS = krakenPortfolio.totalILS + ibkrPortfolio.totalILS + extradePortfolio.totalILS;
@@ -170,16 +218,16 @@ export default function Home() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         <MetricCard
           title="סה״כ שווי כל התיקים"
-          value={`₪ ${Math.round(totalPortfolioILS)} | $ ${Math.round(totalPortfolioUSD)}`}
+          value={formatCurrencyInPrimary(primaryCurrency === 'USD' ? totalPortfolioUSD : totalPortfolioILS, primaryCurrency)}
         />
         <MetricCard
           title="סה״כ רווח/הפסד על כל התיקים"
-          value={`${totalProfitLoss >= 0 ? '+' : ''}${totalProfitLossPercentage.toFixed(1)}% | $ ${totalProfitLoss >= 0 ? '+' : ''}${Math.round(totalProfitLoss)}`}
+          value={`${totalProfitLoss >= 0 ? '+' : ''}${totalProfitLossPercentage.toFixed(1)}% | ${formatCurrencyInPrimary(totalProfitLoss, 'USD')}`}
           valueClassName={totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"}
         />
         <MetricCard
           title="סה״כ מזומן בשקל ומזומן בדולר"
-          value={`₪ ${Math.round(totalCashILS)} | $ ${Math.round(totalCashUSD)}`}
+          value={formatCurrencyInPrimary(primaryCurrency === 'USD' ? totalCashUSD : totalCashILS, primaryCurrency)}
         />
       </div>
 
@@ -196,20 +244,20 @@ export default function Home() {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">שווי תיק כולל:</span>
-                <span className="font-medium">₪ {Math.round(extradePortfolio.totalILS)} | $ {Math.round(extradePortfolio.totalUSD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(primaryCurrency === 'USD' ? extradePortfolio.totalUSD : extradePortfolio.totalILS, primaryCurrency)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">מזומן:</span>
-                <span className="font-medium">₪ {Math.round(extradeCash.ILS)} | $ {Math.round(extradeCash.USD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(primaryCurrency === 'USD' ? extradeCash.USD : extradeCash.ILS, primaryCurrency)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">השקעות:</span>
-                <span className="font-medium">$ {Math.round(extradePortfolio.investmentsUSD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(extradePortfolio.investmentsUSD, 'USD')}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">רווח/הפסד:</span>
                 <span className={`font-medium ${extradeProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {extradeProfitLoss.percentage.toFixed(1)}% | $ {extradeProfitLoss.amount >= 0 ? '+' : ''}{Math.round(extradeProfitLoss.amount)}
+                  {extradeProfitLoss.percentage.toFixed(1)}% | {formatCurrencyInPrimary(extradeProfitLoss.amount, 'USD')}
                 </span>
               </div>
             </div>
@@ -223,20 +271,20 @@ export default function Home() {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">שווי תיק כולל:</span>
-                <span className="font-medium">₪ {Math.round(ibkrPortfolio.totalILS)} | $ {Math.round(ibkrPortfolio.totalUSD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(primaryCurrency === 'USD' ? ibkrPortfolio.totalUSD : ibkrPortfolio.totalILS, primaryCurrency)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">מזומן:</span>
-                <span className="font-medium">₪ {Math.round(ibkrCash.ILS)} | $ {Math.round(ibkrCash.USD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(primaryCurrency === 'USD' ? ibkrCash.USD : ibkrCash.ILS, primaryCurrency)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">השקעות:</span>
-                <span className="font-medium">$ {Math.round(ibkrPortfolio.investmentsUSD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(ibkrPortfolio.investmentsUSD, 'USD')}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">רווח/הפסד:</span>
                 <span className={`font-medium ${ibkrProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {ibkrProfitLoss.percentage.toFixed(1)}% | $ {ibkrProfitLoss.amount >= 0 ? '+' : ''}{Math.round(ibkrProfitLoss.amount)}
+                  {ibkrProfitLoss.percentage.toFixed(1)}% | {formatCurrencyInPrimary(ibkrProfitLoss.amount, 'USD')}
                 </span>
               </div>
             </div>
@@ -250,20 +298,20 @@ export default function Home() {
             <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">שווי תיק כולל:</span>
-                <span className="font-medium">₪ {Math.round(krakenPortfolio.totalILS)} | $ {Math.round(krakenPortfolio.totalUSD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(primaryCurrency === 'USD' ? krakenPortfolio.totalUSD : krakenPortfolio.totalILS, primaryCurrency)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">מזומן:</span>
-                <span className="font-medium">₪ {Math.round(krakenCash.ILS)} | $ {Math.round(krakenCash.USD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(primaryCurrency === 'USD' ? krakenCash.USD : krakenCash.ILS, primaryCurrency)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">השקעות:</span>
-                <span className="font-medium">$ {Math.round(krakenPortfolio.investmentsUSD)}</span>
+                <span className="font-medium">{formatCurrencyInPrimary(krakenPortfolio.investmentsUSD, 'USD')}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-sm text-gray-600">רווח/הפסד:</span>
                 <span className={`font-medium ${krakenProfitLoss.amount >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {krakenProfitLoss.percentage.toFixed(1)}% | $ {krakenProfitLoss.amount >= 0 ? '+' : ''}{Math.round(krakenProfitLoss.amount)}
+                  {krakenProfitLoss.percentage.toFixed(1)}% | {formatCurrencyInPrimary(krakenProfitLoss.amount, 'USD')}
                 </span>
               </div>
             </div>

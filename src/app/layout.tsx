@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppTopBar } from "@/components/AppTopBar";
+import { CurrencyProvider } from "@/contexts/CurrencyContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -28,10 +29,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AppTopBar />
-        <main className="min-h-screen">
-          {children}
-        </main>
+        <CurrencyProvider>
+          <AppTopBar />
+          <main className="min-h-screen">
+            {children}
+          </main>
+        </CurrencyProvider>
       </body>
     </html>
   );
